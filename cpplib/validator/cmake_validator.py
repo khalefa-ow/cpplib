@@ -3,29 +3,33 @@
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
+from cpplib.validator.cpp_standard import CppStandard, StandardConfig
 
 
 class CMakeValidator:
     """Validate C++ code by attempting to compile it with CMake."""
 
-    def __init__(self, cmake_dir: Path):
+    def __init__(self, cmake_dir: Path, cpp_standard: Optional[CppStandard] = None):
         """
         Initialize the validator.
 
         Args:
             cmake_dir: Directory containing CMakeLists.txt
+            cpp_standard: C++ standard to use (default: C++17)
         """
         self.cmake_dir = Path(cmake_dir)
         self.build_dir = self.cmake_dir / "build"
         self.last_output = ""
         self.last_error = ""
+        self.cpp_standard = cpp_standard or StandardConfig.DEFAULT
 
-    def validate(self, clean: bool = True) -> Tuple[bool, str]:
+    def validate(self, clean: bool = True, cpp_standard: Optional[CppStandard] = None) -> Tuple[bool, str]:
         """
         Validate by running cmake and building.
 
         Args:
             clean: Whether to clean build directory first
+            cpp_standard: Override C++ standard for this build
 
         Returns:
             Tuple of (success: bool, output: str)
@@ -36,6 +40,9 @@ class CMakeValidator:
         if not (self.cmake_dir / "CMakeLists.txt").exists():
             return False, f"CMakeLists.txt not found: {self.cmake_dir}"
 
+        if cpp_standard is not None:
+            self.cpp_standard = cpp_standard
+
         try:
             # Create/clean build directory
             if clean and self.build_dir.exists():
@@ -43,9 +50,15 @@ class CMakeValidator:
 
             self.build_dir.mkdir(exist_ok=True)
 
-            # Run cmake
+            # Run cmake with C++ standard
+            cmake_args = [
+                "cmake",
+                f"-DCMAKE_CXX_STANDARD={self.cpp_standard.to_cmake_flag()}",
+                "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+                "..",
+            ]
             result = subprocess.run(
-                ["cmake", ".."],
+                cmake_args,
                 cwd=str(self.build_dir),
                 capture_output=True,
                 text=True,
@@ -72,7 +85,7 @@ class CMakeValidator:
                 return False, f"Build failed:\n{result.stderr}"
 
             self.last_output = result.stdout
-            return True, "Build successful"
+            return True, f"Build successful ({self.cpp_standard.display_name})"
 
         except subprocess.TimeoutExpired:
             error = "Build timed out"
@@ -155,3 +168,23 @@ class CMakeValidator:
             return True
         except FileNotFoundError:
             return False
+
+    def set_cpp_standard(self, standard: CppStandard) -> None:
+        """Set the C++ standard for compilation."""
+        self.cpp_standard = standard
+
+    def get_cpp_standard(self) -> CppStandard:
+        """Get the current C++ standard."""
+        return self.cpp_standard
+
+    def get_cpp_standard_display(self) -> str:
+        """Get display name of current C++ standard."""
+        return self.cpp_standard.display_name
+
+    def get_supported_standards(self) -> list:
+        """Get list of supported C++ standards."""
+        return StandardConfig.SUPPORTED
+
+    def check_feature_support(self, feature: str) -> bool:
+        """Check if a feature is supported in the current standard."""
+        return StandardConfig.has_feature(self.cpp_standard, feature)

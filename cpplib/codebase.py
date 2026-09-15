@@ -13,6 +13,7 @@ from cpplib.pieces.code_piece import CodePiece
 from cpplib.generator.code_generator import CodeGenerator
 from cpplib.generator.modifier import FileModifier
 from cpplib.validator.cmake_validator import CMakeValidator
+from cpplib.validator.cpp_standard import CppStandard, StandardConfig
 
 
 class CPPCodebase:
@@ -22,13 +23,19 @@ class CPPCodebase:
     Handles parsing, semantic analysis, code extraction, and modification.
     """
 
-    def __init__(self, root_dir: str, cmake_dir: Optional[str] = None):
+    def __init__(
+        self,
+        root_dir: str,
+        cmake_dir: Optional[str] = None,
+        cpp_standard: Optional[CppStandard] = None,
+    ):
         """
         Initialize a C++ codebase.
 
         Args:
             root_dir: Root directory of the C++ project
             cmake_dir: Path to CMakeLists.txt (defaults to root_dir)
+            cpp_standard: C++ standard to use (defaults to C++17)
         """
         self.root_dir = Path(root_dir)
         self.cmake_dir = Path(cmake_dir) if cmake_dir else self.root_dir
@@ -49,7 +56,8 @@ class CPPCodebase:
 
         self.generator = CodeGenerator()
         self.modifier = FileModifier()
-        self.validator = CMakeValidator(self.cmake_dir)
+        self.cpp_standard = cpp_standard or StandardConfig.DEFAULT
+        self.validator = CMakeValidator(self.cmake_dir, self.cpp_standard)
 
     def extract_function(self, qualified_name: str) -> Optional[CodePiece]:
         """
@@ -171,3 +179,20 @@ class CPPCodebase:
     def get_dependencies(self, symbol_name: str) -> dict:
         """Get dependencies for a symbol."""
         return self.semantic_analyzer.get_dependencies(symbol_name)
+
+    def set_cpp_standard(self, standard: CppStandard) -> None:
+        """Set the C++ standard for compilation."""
+        self.cpp_standard = standard
+        self.validator.set_cpp_standard(standard)
+
+    def get_cpp_standard(self) -> CppStandard:
+        """Get the current C++ standard."""
+        return self.cpp_standard
+
+    def get_cpp_standard_display(self) -> str:
+        """Get display name of current C++ standard."""
+        return self.cpp_standard.display_name
+
+    def check_feature_support(self, feature: str) -> bool:
+        """Check if a feature is supported in the current standard."""
+        return StandardConfig.has_feature(self.cpp_standard, feature)

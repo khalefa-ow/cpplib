@@ -2,7 +2,21 @@
   "permissions": {
     "allow": [
       "Bash(git init *)",
-      "Bash(uv pip *)"
+      "Bash(uv pip *)",
+      "Bash(python demo.py)",
+      "Bash(chmod +x /home/mk/cpp_tools/demo.py)",
+      "Bash(chmod +x /home/mk/cpp_tools/demo_validation.py)",
+      "Bash(python demo_validation.py)",
+      "Bash(chmod +x /home/mk/cpp_tools/demo_reporter.py)",
+      "Bash(python demo_reporter.py)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(bash test_with_uv.sh)",
+      "Bash(chmod +x /home/mk/cpp_tools/demo_cpp20_features.py)",
+      "Bash(python demo_cpp20_features.py)",
+      "Bash(mv demo*.py examples/)"
+    ],
+    "additionalDirectories": [
+      "/home/mk/cpp_tools"
     ]
   }
 }

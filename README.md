@@ -70,8 +70,40 @@ print(f"Compilation: {message}")
 
 ## Documentation
 
-- **[USAGE.md](USAGE.md)** - Comprehensive usage guide with 10+ examples
+**📖 Complete Documentation:**
+- **[docs/USAGE.md](docs/USAGE.md)** - Comprehensive usage guide with 10+ examples
+- **[docs/README.md](docs/README.md)** - Documentation index and overview
+
+**📚 Feature Guides:**
+- **[docs/REPORTER_GUIDE.md](docs/REPORTER_GUIDE.md)** - Text output and formatting
+- **[docs/CPP_STANDARDS_GUIDE.md](docs/CPP_STANDARDS_GUIDE.md)** - C++20/C++23 support
+- **[docs/TESTING_FROM_ANYWHERE.md](docs/TESTING_FROM_ANYWHERE.md)** - Testing guide
+
+**🎬 Examples:**
+- **[examples/README.md](examples/README.md)** - Example overview
+- **[examples/demo.py](examples/demo.py)** - Basic feature showcase
+- **[examples/demo_reporter.py](examples/demo_reporter.py)** - Text output examples
+- **[examples/demo_validation.py](examples/demo_validation.py)** - Compilation validation
+- **[examples/demo_cpp20_features.py](examples/demo_cpp20_features.py)** - C++20/C++23 features
+
+**📋 Project Info:**
 - **[CLAUDE.md](CLAUDE.md)** - Architecture and development phases
+
+## Run Examples
+
+```bash
+# Basic feature showcase
+python examples/demo.py
+
+# Text output and formatting
+python examples/demo_reporter.py
+
+# Compilation validation and error handling
+python examples/demo_validation.py
+
+# C++20/C++23 features
+python examples/demo_cpp20_features.py
+```
 
 ## Development
 
