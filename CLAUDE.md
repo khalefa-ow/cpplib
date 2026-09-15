@@ -44,12 +44,14 @@ cpplib/
 - [x] Create base classes (CPPCodebase, CodePiece)
 - [x] Create CMakeLists.txt for test validation
 
-### Phase 2: Parser Layer (NEXT)
-- [ ] Implement tree-sitter C++ parser wrapper
-- [ ] Extract AST nodes (functions, classes, variables)
-- [ ] Build file index
+### Phase 2: Parser Layer (DONE)
+- [x] Implement tree-sitter C++ parser wrapper (CPPParser)
+- [x] Extract AST nodes (functions via FunctionExtractor)
+- [x] Build file index (FileIndex for codebase scanning)
+- [x] Extract function metadata (name, signature, body, line numbers)
+- [x] Test suite: 10 tests, all passing
 
-### Phase 3: Semantic Layer
+### Phase 3: Semantic Layer (NEXT)
 - [ ] Build scope resolver (track variable/function scopes)
 - [ ] Implement dependency graph (track includes, type dependencies)
 - [ ] Type tracking and resolution

@@ -1,9 +1,11 @@
 """Main CPPCodebase class for managing C++ projects."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from cpplib.parser.cpp_parser import CPPParser
 from cpplib.parser.file_index import FileIndex
+from cpplib.semantic.analyzer import SemanticAnalyzer
+from cpplib.semantic.scope_resolver import Symbol
 
 
 class CPPCodebase:
@@ -31,6 +33,9 @@ class CPPCodebase:
         self.file_index = FileIndex(self.root_dir)
         self.file_index.index_directory()
 
+        self.semantic_analyzer = SemanticAnalyzer(self.file_index)
+        self.semantic_analyzer.analyze()
+
     def extract_function(self, qualified_name: str):
         """Extract a function/method with its dependencies."""
         raise NotImplementedError("Function extraction not yet implemented")
@@ -54,3 +59,19 @@ class CPPCodebase:
     def validate(self) -> bool:
         """Validate the codebase compiles correctly using cmake."""
         raise NotImplementedError("Validator layer not yet implemented")
+
+    def get_all_functions(self) -> List[Symbol]:
+        """Get all functions in the codebase."""
+        return self.semantic_analyzer.list_all_functions()
+
+    def get_all_classes(self) -> List[Symbol]:
+        """Get all classes/structs in the codebase."""
+        return self.semantic_analyzer.list_all_classes()
+
+    def get_symbol(self, name: str) -> Optional[Symbol]:
+        """Look up a symbol by name."""
+        return self.semantic_analyzer.get_symbol(name)
+
+    def get_dependencies(self, symbol_name: str) -> dict:
+        """Get dependencies for a symbol."""
+        return self.semantic_analyzer.get_dependencies(symbol_name)
