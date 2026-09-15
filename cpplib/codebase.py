@@ -1,8 +1,9 @@
 """Main CPPCodebase class for managing C++ projects."""
 
-import os
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
+from cpplib.parser.cpp_parser import CPPParser
+from cpplib.parser.file_index import FileIndex
 
 
 class CPPCodebase:
@@ -26,13 +27,17 @@ class CPPCodebase:
         if not self.root_dir.exists():
             raise ValueError(f"Root directory does not exist: {root_dir}")
 
+        self.parser = CPPParser()
+        self.file_index = FileIndex(self.root_dir)
+        self.file_index.index_directory()
+
     def extract_function(self, qualified_name: str):
         """Extract a function/method with its dependencies."""
-        raise NotImplementedError("Parser layer not yet implemented")
+        raise NotImplementedError("Function extraction not yet implemented")
 
     def extract_class(self, qualified_name: str):
         """Extract a class with its dependencies."""
-        raise NotImplementedError("Parser layer not yet implemented")
+        raise NotImplementedError("Class extraction not yet implemented")
 
     def insert_function(self, file_path: str, piece, after: Optional[str] = None, before: Optional[str] = None):
         """Insert a code piece (function) into a file."""
