@@ -64,12 +64,14 @@ cpplib/
 - [x] Extract methods: extract_function(), extract_class() on CPPCodebase
 - [x] Test suite: 11 tests, all passing
 
-### Phase 5: Generation & Modification
-- [ ] Code generation from CodePiece
-- [ ] AST-based insertion (before/after targets)
-- [ ] Diff-based patching
+### Phase 5: Generation & Modification (DONE)
+- [x] Code generation from CodePiece (CodeGenerator)
+- [x] File insertion (before/after targets via FileModifier)
+- [x] Replace and delete functions
+- [x] Track and apply modifications
+- [x] Test suite: 17 tests, all passing
 
-### Phase 6: Validation
+### Phase 6: Validation (FINAL)
 - [ ] CMake integration
 - [ ] Build and validation
 - [ ] Error reporting

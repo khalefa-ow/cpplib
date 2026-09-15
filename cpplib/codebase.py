@@ -1,7 +1,7 @@
 """Main CPPCodebase class for managing C++ projects."""
 
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from cpplib.parser.cpp_parser import CPPParser
 from cpplib.parser.file_index import FileIndex
 from cpplib.parser.function_extractor import FunctionExtractor
@@ -12,6 +12,7 @@ from cpplib.semantic.scope_resolver import Symbol
 from cpplib.pieces.code_piece import CodePiece
 from cpplib.generator.code_generator import CodeGenerator
 from cpplib.generator.modifier import FileModifier
+from cpplib.validator.cmake_validator import CMakeValidator
 
 
 class CPPCodebase:
@@ -48,6 +49,7 @@ class CPPCodebase:
 
         self.generator = CodeGenerator()
         self.modifier = FileModifier()
+        self.validator = CMakeValidator(self.cmake_dir)
 
     def extract_function(self, qualified_name: str) -> Optional[CodePiece]:
         """
@@ -142,9 +144,17 @@ class CPPCodebase:
         """
         return self.modifier.apply_modifications()
 
-    def validate(self) -> bool:
-        """Validate the codebase compiles correctly using cmake."""
-        raise NotImplementedError("Validator layer not yet implemented")
+    def validate(self, clean: bool = True) -> Tuple[bool, str]:
+        """
+        Validate the codebase compiles correctly using cmake.
+
+        Args:
+            clean: Whether to clean build directory first
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        return self.validator.validate(clean=clean)
 
     def get_all_functions(self) -> List[Symbol]:
         """Get all functions in the codebase."""
