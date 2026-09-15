@@ -4,8 +4,12 @@ from pathlib import Path
 from typing import Optional, List
 from cpplib.parser.cpp_parser import CPPParser
 from cpplib.parser.file_index import FileIndex
+from cpplib.parser.function_extractor import FunctionExtractor
+from cpplib.parser.class_extractor import ClassExtractor
 from cpplib.semantic.analyzer import SemanticAnalyzer
+from cpplib.semantic.dependency_collector import DependencyCollector
 from cpplib.semantic.scope_resolver import Symbol
+from cpplib.pieces.code_piece import CodePiece
 
 
 class CPPCodebase:
@@ -36,13 +40,57 @@ class CPPCodebase:
         self.semantic_analyzer = SemanticAnalyzer(self.file_index)
         self.semantic_analyzer.analyze()
 
-    def extract_function(self, qualified_name: str):
-        """Extract a function/method with its dependencies."""
-        raise NotImplementedError("Function extraction not yet implemented")
+        self.function_extractor = FunctionExtractor(self.parser)
+        self.class_extractor = ClassExtractor(self.parser)
+        self.dependency_collector = DependencyCollector(self.semantic_analyzer)
 
-    def extract_class(self, qualified_name: str):
-        """Extract a class with its dependencies."""
-        raise NotImplementedError("Class extraction not yet implemented")
+    def extract_function(self, qualified_name: str) -> Optional[CodePiece]:
+        """
+        Extract a function/method with its dependencies.
+
+        Args:
+            qualified_name: Function name (e.g., "add" or "MyClass::myMethod")
+
+        Returns:
+            CodePiece representing the function with dependencies, or None if not found
+        """
+        # Find the function in any file
+        for file_path in self.file_index.list_files():
+            code = self.file_index.get_content(file_path)
+            if not code:
+                continue
+
+            func = self.function_extractor.extract_function_by_name(
+                file_path, code, qualified_name
+            )
+            if func:
+                # Enhance with full dependencies
+                return self.dependency_collector.extract_with_dependencies(func)
+
+        return None
+
+    def extract_class(self, qualified_name: str) -> Optional[CodePiece]:
+        """
+        Extract a class with its dependencies.
+
+        Args:
+            qualified_name: Class name
+
+        Returns:
+            CodePiece representing the class with dependencies, or None if not found
+        """
+        # Find the class in any file
+        for file_path in self.file_index.list_files():
+            code = self.file_index.get_content(file_path)
+            if not code:
+                continue
+
+            cls = self.class_extractor.extract_class_by_name(file_path, code, qualified_name)
+            if cls:
+                # Enhance with full dependencies
+                return self.dependency_collector.extract_with_dependencies(cls)
+
+        return None
 
     def insert_function(self, file_path: str, piece, after: Optional[str] = None, before: Optional[str] = None):
         """Insert a code piece (function) into a file."""

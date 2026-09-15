@@ -25,15 +25,15 @@ def test_codebase_invalid_directory():
         CPPCodebase("/nonexistent/path")
 
 
-def test_extract_function_not_implemented(temp_project_dir):
-    """Test extract_function raises NotImplementedError."""
+def test_extract_function_returns_none_if_not_found(temp_project_dir):
+    """Test extract_function returns None if function not found."""
     codebase = CPPCodebase(str(temp_project_dir))
-    with pytest.raises(NotImplementedError):
-        codebase.extract_function("MyClass::myMethod")
+    result = codebase.extract_function("NonexistentFunction")
+    assert result is None
 
 
-def test_extract_class_not_implemented(temp_project_dir):
-    """Test extract_class raises NotImplementedError."""
+def test_extract_class_returns_none_if_not_found(temp_project_dir):
+    """Test extract_class returns None if class not found."""
     codebase = CPPCodebase(str(temp_project_dir))
-    with pytest.raises(NotImplementedError):
-        codebase.extract_class("MyClass")
+    result = codebase.extract_class("NonexistentClass")
+    assert result is None

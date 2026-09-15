@@ -51,12 +51,14 @@ cpplib/
 - [x] Extract function metadata (name, signature, body, line numbers)
 - [x] Test suite: 10 tests, all passing
 
-### Phase 3: Semantic Layer (NEXT)
-- [ ] Build scope resolver (track variable/function scopes)
-- [ ] Implement dependency graph (track includes, type dependencies)
-- [ ] Type tracking and resolution
+### Phase 3: Semantic Layer (DONE)
+- [x] Build scope resolver (ScopeResolver, Symbol class)
+- [x] Implement dependency graph (includes, types, calls, transitive resolution)
+- [x] Type tracking and dependency queries
+- [x] Full codebase analysis on CPPCodebase init
+- [x] Test suite: 15 tests, all passing
 
-### Phase 4: Pieces & Extraction
+### Phase 4: Pieces & Extraction (NEXT)
 - [ ] Implement function/class extraction
 - [ ] Dependency collection (includes, forward decls, type deps)
 - [ ] Handle edge cases (templates, nested classes, etc.)
