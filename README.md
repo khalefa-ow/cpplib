@@ -68,6 +68,11 @@ is_valid, message = codebase.validate()
 print(f"Compilation: {message}")
 ```
 
+## Documentation
+
+- **[USAGE.md](USAGE.md)** - Comprehensive usage guide with 10+ examples
+- **[CLAUDE.md](CLAUDE.md)** - Architecture and development phases
+
 ## Development
 
 Run tests:
