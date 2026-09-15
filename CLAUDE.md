@@ -58,10 +58,11 @@ cpplib/
 - [x] Full codebase analysis on CPPCodebase init
 - [x] Test suite: 15 tests, all passing
 
-### Phase 4: Pieces & Extraction (NEXT)
-- [ ] Implement function/class extraction
-- [ ] Dependency collection (includes, forward decls, type deps)
-- [ ] Handle edge cases (templates, nested classes, etc.)
+### Phase 4: Pieces & Extraction (DONE)
+- [x] Implement function/class extraction (ClassExtractor)
+- [x] Dependency collection (DependencyCollector, includes, forward decls, type deps)
+- [x] Extract methods: extract_function(), extract_class() on CPPCodebase
+- [x] Test suite: 11 tests, all passing
 
 ### Phase 5: Generation & Modification
 - [ ] Code generation from CodePiece

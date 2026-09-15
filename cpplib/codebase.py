@@ -10,6 +10,8 @@ from cpplib.semantic.analyzer import SemanticAnalyzer
 from cpplib.semantic.dependency_collector import DependencyCollector
 from cpplib.semantic.scope_resolver import Symbol
 from cpplib.pieces.code_piece import CodePiece
+from cpplib.generator.code_generator import CodeGenerator
+from cpplib.generator.modifier import FileModifier
 
 
 class CPPCodebase:
@@ -43,6 +45,9 @@ class CPPCodebase:
         self.function_extractor = FunctionExtractor(self.parser)
         self.class_extractor = ClassExtractor(self.parser)
         self.dependency_collector = DependencyCollector(self.semantic_analyzer)
+
+        self.generator = CodeGenerator()
+        self.modifier = FileModifier()
 
     def extract_function(self, qualified_name: str) -> Optional[CodePiece]:
         """
@@ -92,17 +97,50 @@ class CPPCodebase:
 
         return None
 
-    def insert_function(self, file_path: str, piece, after: Optional[str] = None, before: Optional[str] = None):
-        """Insert a code piece (function) into a file."""
-        raise NotImplementedError("Generator layer not yet implemented")
+    def insert_function(
+        self, file_path: str, piece: CodePiece, after: Optional[str] = None, before: Optional[str] = None
+    ) -> bool:
+        """
+        Insert a function into a file.
 
-    def insert_class(self, file_path: str, piece, after: Optional[str] = None, before: Optional[str] = None):
-        """Insert a code piece (class) into a file."""
-        raise NotImplementedError("Generator layer not yet implemented")
+        Args:
+            file_path: Path to the target C++ file
+            piece: CodePiece representing the function
+            after: Insert after this function name (optional)
+            before: Insert before this function name (optional)
 
-    def generate(self):
-        """Generate changes (apply modifications to files)."""
-        raise NotImplementedError("Generator layer not yet implemented")
+        Returns:
+            True if insertion was queued successfully
+        """
+        file_path_obj = Path(file_path)
+        return self.modifier.insert_function(file_path_obj, piece, after, before)
+
+    def insert_class(
+        self, file_path: str, piece: CodePiece, after: Optional[str] = None, before: Optional[str] = None
+    ) -> bool:
+        """
+        Insert a class into a file.
+
+        Args:
+            file_path: Path to the target C++ file
+            piece: CodePiece representing the class
+            after: Insert after this class name (optional)
+            before: Insert before this class name (optional)
+
+        Returns:
+            True if insertion was queued successfully
+        """
+        file_path_obj = Path(file_path)
+        return self.modifier.insert_class(file_path_obj, piece, after, before)
+
+    def generate(self) -> bool:
+        """
+        Apply all pending modifications to files.
+
+        Returns:
+            True if all modifications succeeded
+        """
+        return self.modifier.apply_modifications()
 
     def validate(self) -> bool:
         """Validate the codebase compiles correctly using cmake."""
