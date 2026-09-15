@@ -1,6 +1,6 @@
 # cpplib - C++ Code Generation & Manipulation Library
 
-A Python library for reading, analyzing, and modifying C++ code. Supports semantic understanding of functions, classes, and files.
+A Python library for reading, analyzing, and modifying C++ code with semantic understanding. Extract functions/classes with their dependencies, insert them into new locations, and validate changes compile correctly.
 
 ## Features
 
@@ -31,27 +31,41 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```python
-from cpplib import CPPCodebase
+from cpplib import CPPCodebase, CodePiece
 
 # Load a C++ project
 codebase = CPPCodebase("/path/to/project")
 
-# Extract a function with dependencies
-func_piece = codebase.extract_function("MyClass::myMethod")
-print(func_piece.dependencies)
+# Extract a function with all dependencies
+func = codebase.extract_function("add")
+print(f"Function: {func.name}")
+print(f"Signature: {func.signature}")
+print(f"Dependencies: {func.dependencies}")
 
-# Add a new function
-from cpplib import CodePiece
+# Extract a class with members
+cls = codebase.extract_class("Calculator")
+
+# Get all functions and classes in the codebase
+functions = codebase.get_all_functions()
+classes = codebase.get_all_classes()
+
+# Create a new function
 new_func = CodePiece(
-    name="newFunction",
+    name="multiply",
     kind="function",
-    signature="void newFunction(int x)",
-    body="{ /* implementation */ }",
+    signature="int multiply(int a, int b)",
+    body="{ return a * b; }",
 )
-codebase.insert_function("file.cpp", new_func, after="someFunction")
+
+# Insert function into a file at a specific location
+codebase.insert_function("src/math.cpp", new_func, after="add")
+
+# Apply modifications
+success = codebase.generate()
 
 # Validate changes compile
-codebase.validate()
+is_valid, message = codebase.validate()
+print(f"Compilation: {message}")
 ```
 
 ## Development
