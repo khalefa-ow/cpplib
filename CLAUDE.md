@@ -89,15 +89,14 @@ levels → generate storage-layout header → generate per-query C++ and fix unt
 it compiles and matches DuckDB gold → optimize with hints. See
 [agent/README.md](agent/README.md).
 
-Status: skeleton complete. `storage_plan` runs end to end; `divide`, `hppgen`,
-`query_codegen` and `optimize` are wired with their contracts documented in
-their class docstrings and raise `StageNotImplemented`.
+Status: complete. All five stages (`storage_plan`, `divide`, `hppgen`,
+`query_codegen`, `optimize`) are implemented and tested offline.
 
 ```bash
 uv pip install -e ".[dev,agent]"   # dspy, duckdb, pyarrow
 python -m agent.cli doctor         # deno (required by dspy.RLM), cmake, g++, API keys
 python -m agent.cli run --config agent/examples/config.example.json --dry-run
-pytest tests/agent -v              # 236 tests, no API key needed
+pytest tests/agent -v              # 352 tests, no API key needed
 ```
 
 Notes for future work:
@@ -114,6 +113,22 @@ Notes for future work:
 - Prompts live in `prompts/*.txt`, indexed by `agent/prompting/manifest.json`.
   Run `python -m agent.cli prompts build` after editing any prompt, or the
   registry will refuse to use a stale entry.
+- `query_codegen` and `optimize` need `params.run_command` to execute the
+  generated engine; without it `query_codegen` reports every query as
+  `unverified` (it never claims correctness it did not check) and `optimize`
+  refuses to start.
+- `query_codegen` generates **one hint level per run**. To compare levels, run
+  the pipeline once per level with its own `artifacts_dir` and
+  `gen_project_root`.
+- The compile/correctness loops are driven by the stages, not by the model, so
+  the round budgets are enforced and the round counts in `metrics` are measured
+  rather than self-reported. `params.rlm_tools` hands the model the workspace
+  tools instead.
+- An artifact carries `input_fingerprint` only when the stage succeeded. That
+  field is what marks an artifact current, so stamping a failed run would make
+  the pipeline skip the retry.
+- `tests/agent/conftest.py` deletes every provider API key for every test. Keep
+  it that way: the suite must not be able to make a billable call.
 
 ## Quick Commands
 

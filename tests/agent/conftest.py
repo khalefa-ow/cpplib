@@ -15,6 +15,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = REPO_ROOT / "prompts"
 
 
+@pytest.fixture(autouse=True)
+def no_provider_keys(monkeypatch):
+    """Remove every provider API key from the environment for every test.
+
+    The suite is meant to run offline against a DummyLM. Without this, a stage
+    that reaches the model by mistake would find an ambient OPENAI_API_KEY,
+    silently make a real billable call, and pass or fail for the wrong reason —
+    which is exactly what happened before this fixture existed.
+    """
+    from agent.llm.lm_factory import PROVIDER_DEFAULTS
+
+    for env_var, _ in PROVIDER_DEFAULTS.values():
+        if env_var:
+            monkeypatch.delenv(env_var, raising=False)
+
+
 @pytest.fixture
 def prompts_dir(tmp_path):
     """A copy of the real prompts directory, safe to mutate."""

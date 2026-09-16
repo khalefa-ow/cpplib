@@ -520,6 +520,16 @@ class CppWorkspace:
             timeout_s=min(cfg.timeout_s, 120),
         )
 
+    def has_cmake_project(self) -> bool:
+        """Whether :meth:`build_project` has anything to build.
+
+        Checked by the stages before building: a tree that was never set up for
+        CMake would otherwise fail every query on a configuration error that has
+        nothing to do with the generated code, and send the fix loop chasing it.
+        """
+        cmake_dir = self.compile_config.cmake_dir or self.cmake_dir
+        return (Path(cmake_dir) / "CMakeLists.txt").exists()
+
     def build_project(self) -> CompileResult:
         """Configure and build the whole CMake project."""
         cfg = self.compile_config

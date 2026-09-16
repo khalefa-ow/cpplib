@@ -223,20 +223,16 @@ class StoragePlanStage(Stage):
 
 def _callback(writer: Any) -> Any:
     """The trace callback, imported lazily so the module loads without dspy."""
-    from agent.trace.callbacks import JsonlTraceCallback
+    from agent.stages.predict import trace_callback
 
-    return JsonlTraceCallback(writer)
+    return trace_callback(writer)
 
 
 def _usage_of(prediction: Any) -> dict[str, Any]:
     """Token usage from a prediction, when ``track_usage`` is on."""
-    getter = getattr(prediction, "get_lm_usage", None)
-    if not callable(getter):
-        return {}
-    try:
-        return getter() or {}
-    except Exception:
-        return {}
+    from agent.stages.predict import usage_of
+
+    return usage_of(prediction)
 
 
 def _read(path: Optional[Path]) -> str:

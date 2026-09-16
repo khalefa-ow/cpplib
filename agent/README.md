@@ -15,8 +15,14 @@ uv pip install -e ".[dev,agent]"          # adds dspy, duckdb, pyarrow
 python -m agent.cli doctor                # check deno, cmake, g++, keys
 python -m agent.cli prompts build         # (re)generate the prompt manifest
 python -m agent.cli run --config agent/examples/config.example.json --dry-run
-python -m agent.cli run --config agent/examples/config.example.json --stages storage_plan
+python -m agent.cli run --config agent/examples/config.example.json
 ```
+
+All five stages are implemented. A run resumes: a stage whose outputs already
+reflect its current inputs is skipped, so a run that dies in `optimize` does not
+re-pay for planning and code generation. `--force` re-runs anyway (and still
+hits the disk cache), `--stages` restricts the selection and `--start-from`
+begins partway through.
 
 `doctor` is the first thing to run: `dspy.RLM` needs the **Deno** runtime for its
 Pyodide sandbox, and a missing Deno otherwise surfaces as an opaque protocol
@@ -24,19 +30,84 @@ error deep inside the interpreter.
 
 ## Stages
 
-| Stage | Requires | Produces | State |
-|---|---|---|---|
-| `storage_plan` | – | `storage_plan`, `storage_plan_meta` | **implemented** |
-| `divide` | `storage_plan` | `schema_levels` | contract stub |
-| `hppgen` | `schema_levels` | `storage_layout_headers` | contract stub |
-| `query_codegen` | `schema_levels`, `storage_layout_headers` | `query_sources`, `correctness_report` | contract stub |
-| `optimize` | `query_sources`, `correctness_report` | `optimization_report` | contract stub |
+| Stage | Requires | Produces |
+|---|---|---|
+| `storage_plan` | – | `storage_plan`, `storage_plan_meta` |
+| `divide` | `storage_plan` | `schema_levels` |
+| `hppgen` | `schema_levels` | `storage_layout_headers` |
+| `query_codegen` | `schema_levels`, `storage_layout_headers` | `query_sources`, `correctness_report` |
+| `optimize` | `query_sources`, `correctness_report` | `optimization_report` |
 
 Execution order is derived from these `requires`/`produces` declarations, not
-hardcoded. Each stub raises `StageNotImplemented`; its class docstring is the
-implementation contract (inputs, output shape, loop structure, prompts, caching).
-Everything around the stub — config resolution, prompt binding, artifact keys,
-cache keying — already works and is covered by tests.
+hardcoded. Each stage's class docstring documents its config keys and output
+shape.
+
+**`storage_plan`** reasons about the layout from schema + workload + statistics.
+No workspace and no tools: it is designing, not editing.
+
+**`divide`** splits schema and plan into the levels declared in `common.levels`
+— `no_hints`, `organization_level`, `all_hints` in the example. This is what
+makes the pipeline an ablation: generate the engine once per level and the value
+of the storage plan is measurable. The split is validated against the declared
+level names before it is written, because a level missing here surfaces two
+stages later as a failure in `hppgen`.
+
+**`hppgen`** generates one storage-layout header per active level, then compiles
+it and repairs it up to `compile.max_fix_rounds` times. Only a header that
+actually compiled is cached, so a re-run retries a broken one instead of serving
+it from disk forever.
+
+**`query_codegen`** generates one translation unit per query and loops until it
+compiles *and* matches gold. Two budgets, deliberately separate:
+`compile.max_fix_rounds` for compile and link errors,
+`params.max_correctness_rounds` for result mismatches — a missing include is a
+one-line fix while a wrong answer usually means the plan was wrong, and one
+shared budget would let trivial compile errors consume the rounds a mismatch
+needs. Comparison is full-output with a per-cell tolerance for floats, and
+reports the first differing row and column: a model told "row 4, column revenue:
+expected 1234.50, got 1234.00" fixes the accumulator, whereas one told "wrong"
+rewrites at random.
+
+It generates **one level per run**. Several levels in one tree would collide on
+filenames and on the build, so compare levels by running the pipeline once per
+level with its own `artifacts_dir` and `gen_project_root`.
+
+**`optimize`** refuses to start unless every query in scope compiled and matched
+— a faster wrong answer is not an improvement, and finding that out at the end
+costs the whole budget. Each round snapshots the workspace, applies the model's
+patch, rebuilds, re-verifies *every* query in scope against gold (the storage
+layout is shared, so an edit made for one query is exactly how the others
+break), measures a median of `params.repeat_runs` runs, and keeps the change
+only if it cleared `params.min_improvement`. Otherwise the snapshot is restored.
+All four optimization prompts end with "Make sure the performance improved.
+Otherwise, try again or remove your changes"; the snapshot is what turns that
+from advice into a guarantee.
+
+### Executing the generated engine
+
+`query_codegen` and `optimize` need a way to run what was generated, and that is
+a property of the project being generated, not of this package — so it comes
+from `params.run_command`, a shell template:
+
+```json
+"run_command": "./build/engine --query {query_id} --out {output} --sf {sf}"
+```
+
+Placeholders: `{query_id}`, `{query_text}`, `{output}`, `{project_root}`,
+`{build_dir}`, `{dataset_dir}`, `{sf}`, `{trace}`. The template is split into
+argv *before* substitution, so a query containing spaces or quotes stays one
+argument. Output is read from the `{output}` file when the template names one
+and from stdout otherwise. `optimize` inherits the command recorded in
+`correctness_report`, so it need not be repeated.
+
+Without a run command, `query_codegen` reports every query as `unverified` and
+the run summary carries `verified=False`. It does not claim correctness it did
+not check, and `optimize` then refuses to start.
+
+For timing, set `params.runtime_pattern` to a regex whose first group is the
+engine's own reported runtime. Wall clock includes process start and data load,
+which are identical every round and so shrink the apparent effect of a real
+improvement.
 
 ## Layout
 
@@ -49,8 +120,21 @@ agent/
 ├── llm/              dspy.LM construction (OpenAI/DeepSeek), content-addressed cache
 ├── trace/            span stack, JSONL callbacks, optional weave/wandb
 ├── rlm/              CppWorkspace, compile results, tool callables, CppRLM
-└── stages/           Stage ABC, ArtifactStore, the five stages
+└── stages/           Stage ABC, ArtifactStore, the five stages, and their
+                      support layer: parsing, results, gold, execution, fixing
 ```
+
+The support modules under `stages/` are where the non-obvious correctness lives
+and are tested directly in `tests/agent/test_agent_support.py`:
+
+| Module | Responsibility |
+|---|---|
+| `parsing.py` | Strip fences off model output; scan a workload into queries with stable ids (a `;` inside a string or comment is not a split point) |
+| `results.py` | Compare output to gold, locate the first difference, tolerate float drift but not an off-by-one integer |
+| `gold.py` | Produce or find reference results (DuckDB / external command / pre-existing) |
+| `execution.py` | Run the engine through the configured command; median-of-N timing |
+| `fixing.py` | The generate → verify → repair loop, with a budget and a no-progress guard |
+| `predict.py` | The one place a signature plus a payload becomes an answer; the seam tests patch |
 
 ## Config
 
@@ -91,6 +175,11 @@ a prompt:
 python -m agent.cli prompts build
 python -m agent.cli prompts show optim_w_trace --var query_id=7 --var sf=0.25 ...
 ```
+
+`hppgen_policy` and `query_codegen_task` carry the generation instructions for
+the two code stages; `fix_compile_errors` is the repair prompt both of them use,
+and it is in their `default_prompt_ids` so that editing it invalidates exactly
+their caches.
 
 The builder detects placeholders in both `${braced}` and bare `$named` form,
 preserves hand-edited `stage`/`role`/`description`/`composes`, and bumps
@@ -158,7 +247,17 @@ in `tests/agent/test_agent_workspace.py`:
 pytest tests/agent -v
 ```
 
-236 tests, none needing an API key: the LLM is DSPy's `DummyLM` and the C++
-workspace is a real on-disk tree, so the cpplib integration is exercised for
-real. The live RLM smoke test is gated behind `AGENT_LIVE_RLM=1` because it
-costs tokens.
+352 tests, none needing an API key. An autouse fixture deletes every provider
+key from the environment, so a stage that reached a real model by mistake would
+fail rather than quietly bill you.
+
+Everything except the provider round trip is real: g++ compiles the headers and
+queries the stages generate, the generated engine is executed, its output is
+compared against a gold file on disk, and `optimize` measures a genuine change
+in the engine's runtime before deciding to keep or revert a round. The model is
+either DSPy's `DummyLM` — so signature construction, the adapter, the callbacks,
+caching and artifact writing all run for real — or a queued fake `invoke` where
+a test needs to control what each successive call returns.
+
+The live RLM smoke test is gated behind `AGENT_LIVE_RLM=1` because it costs
+tokens.

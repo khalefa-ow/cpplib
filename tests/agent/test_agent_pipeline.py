@@ -312,12 +312,13 @@ class TestPipelineExecution:
         assert _Producer.runs == []
 
 
-class TestStubbedStages:
-    """The four unimplemented stages are wired: config, prompts and contracts."""
+class TestStageContracts:
+    """Every stage declares the artifact contract the pipeline orders it by."""
 
     @pytest.mark.parametrize(
         "name,requires,produces",
         [
+            ("storage_plan", (), ("storage_plan", "storage_plan_meta")),
             ("divide", ("storage_plan",), ("schema_levels",)),
             ("hppgen", ("schema_levels",), ("storage_layout_headers",)),
             (
@@ -332,25 +333,28 @@ class TestStubbedStages:
         cls = STAGES[name]
         assert cls.requires == requires
         assert cls.produces == produces
-        assert cls.__doc__ and "Contract for the implementation" in cls.__doc__
+        assert cls.__doc__ and "Requires:" in cls.__doc__ and "Produces:" in cls.__doc__
 
     def test_default_prompt_ids_exist_in_the_manifest(self, registry):
         for name, cls in STAGES.items():
             for prompt_id in cls.default_prompt_ids:
                 assert registry.get(prompt_id), f"{name} references missing prompt {prompt_id}"
 
-    def test_running_a_stub_reports_not_implemented(self, config_dict, manifest_path, tmp_path):
-        from agent.config.loader import LoadedConfig
+    def test_every_produced_artifact_has_exactly_one_producer(self):
+        """Two stages producing one key would make the ordering ambiguous."""
+        producers = {}
+        for name, cls in STAGES.items():
+            for key in cls.produces:
+                assert (
+                    key not in producers
+                ), f"{key} produced by both {producers.get(key)} and {name}"
+                producers[key] = name
 
-        # Satisfy divide's requirement so it reaches its own body.
-        store = ArtifactStore(tmp_path / "artifacts")
-        store.put_text("storage_plan", "storage_plan", "a plan")
-
-        config_dict["stages"] = {"divide": {"prompt_ids": ["divide_policy"]}}
-        pipeline = Pipeline(LoadedConfig(config_dict), manifest_path=manifest_path)
-        summary = pipeline.run(only=["divide"])
-        assert summary.ok is False
-        assert "not implemented" in summary.results[0].error
+    def test_every_requirement_is_produced_by_some_stage(self):
+        produced = {key for cls in STAGES.values() for key in cls.produces}
+        for name, cls in STAGES.items():
+            for key in cls.requires:
+                assert key in produced, f"{name} requires {key}, which nothing produces"
 
 
 # --- storage_plan, end to end with a fake LM ------------------------------
@@ -513,13 +517,29 @@ class TestStoragePlanStage:
         assert summary.ok is False
         assert "empty storage plan" in summary.results[0].error
 
-    def test_plan_then_divide_passes_the_artifact_downstream(
-        self, loaded_config, manifest_path, patched_configure
+    def test_the_plan_reaches_divide_as_an_input(
+        self, loaded_config, manifest_path, patched_configure, monkeypatch
     ):
-        """Proves the handoff works even though divide itself is a stub."""
-        pipeline = Pipeline(loaded_config, manifest_path=manifest_path)
-        summary = pipeline.run(stop_on_error=False)
-        statuses = {r.stage: r.status for r in summary.results}
-        assert statuses["storage_plan"] == "ok"
-        assert statuses["divide"] == "failed"
-        assert "not implemented" in {r.stage: r.error for r in summary.results}["divide"]
+        """The handoff: what storage_plan wrote is what divide reads."""
+        seen = {}
+
+        def capture(signature, payload, outputs, **kwargs):
+            seen.update(payload)
+            return {
+                "schema_levels": json.dumps(
+                    {
+                        "levels": {"no_hints": "facts", "all_hints": "facts and hints"},
+                        "data_structure_descriptions": {"no_hints": "d", "all_hints": "d"},
+                    }
+                ),
+                "predictor": "Fake",
+                "usage": {},
+            }
+
+        monkeypatch.setattr("agent.stages.divide.invoke", capture)
+        summary = Pipeline(loaded_config, manifest_path=manifest_path).run(
+            only=["storage_plan", "divide"]
+        )
+        assert summary.ok, summary.report()
+        assert seen["storage_plan"].strip() == PLAN_TEXT.strip()
+        assert seen["level_names"] == "no_hints, all_hints"

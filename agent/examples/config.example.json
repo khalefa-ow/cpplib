@@ -88,10 +88,16 @@
       "prompt_ids": ["fix_compile_errors"],
       "cache": { "dir": "out/.cache/query_codegen" },
       "params": {
+        "run_command": "./build/engine --query {query_id} --out {output} --sf {sf}",
+        "sf": "0.25",
+        "source_dir": "src/queries",
+        "build_project": "auto",
         "database_type_name": "Database",
         "database_param_name": "db",
         "query_namespace_prefix": "queries::",
         "query_function_name": "run",
+        "header_mode": "gold",
+        "sort_rows": false,
         "float_tolerance": 1e-6,
         "max_correctness_rounds": 3
       }
@@ -105,7 +111,11 @@
         "max_rounds": 4,
         "min_improvement": 0.05,
         "repeat_runs": 3,
-        "sf": "0.25"
+        "sf": "0.25",
+        "target_factor": 2.0,
+        "runtime_pattern": "total runtime: ([0-9.]+)s",
+        "trace_flag": "--trace",
+        "trace_log": "tracing_output.log"
       }
     }
   }

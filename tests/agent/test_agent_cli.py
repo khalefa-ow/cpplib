@@ -221,27 +221,24 @@ class TestRun:
         assert summary["results"][0]["artifacts"]["storage_plan"]["content_hash"]
 
     def test_run_exits_nonzero_when_a_stage_fails(self, capsys, config_file, manifest_path):
-        """divide is a stub, so this exercises the failure exit path."""
-        from agent.stages.base import ArtifactStore
-        from agent.config.loader import LoadedConfig
+        """hppgen without its upstream artifact exercises the failure exit path.
 
-        config = LoadedConfig.from_file(config_file)
-        store = ArtifactStore(config.resolve_stage("divide").artifacts_dir)
-        store.put_text("storage_plan", "storage_plan", "a plan")
-
+        Chosen because it fails before any model call, so the exit-code path is
+        tested without a network round trip.
+        """
         code = main(
             [
                 "run",
                 "--config",
                 str(config_file),
                 "--stages",
-                "divide",
+                "hppgen",
                 "--manifest",
                 str(manifest_path),
             ]
         )
         assert code == 1
-        assert "not implemented" in capsys.readouterr().out
+        assert "Missing required artifact(s): schema_levels" in capsys.readouterr().out
 
 
 class TestArgParsing:

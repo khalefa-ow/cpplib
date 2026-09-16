@@ -51,6 +51,17 @@
       "stage": "query_codegen",
       "version": 1
     },
+    "hppgen_policy": {
+      "composes": {},
+      "description": "",
+      "file": "hppgen_policy.txt",
+      "id": "hppgen_policy",
+      "placeholders": [],
+      "role": "task",
+      "sha256": "95cd80e8d78f871470ad8f1859c7d5af56da4e1669e0654b4c809426e4070fd6",
+      "stage": "hppgen",
+      "version": 1
+    },
     "optim_add_timings_collect_stats": {
       "composes": {},
       "description": "",
@@ -210,6 +221,21 @@
       "role": "task",
       "sha256": "4313f76f2e2e27ca5f065ae8958b8cc329f1948e990dcfd8626f5c83bbbee311",
       "stage": "optimize",
+      "version": 1
+    },
+    "query_codegen_task": {
+      "composes": {},
+      "description": "",
+      "file": "query_codegen_task.txt",
+      "id": "query_codegen_task",
+      "placeholders": [
+        "entry_signature",
+        "delimiter",
+        "header_rule"
+      ],
+      "role": "task",
+      "sha256": "730f9a40b1a0f0a60628287c7be53fbaa8322917f7c231991138026061004ef5",
+      "stage": "query_codegen",
       "version": 1
     },
     "storage_plan_policy": {
