@@ -1,0 +1,228 @@
+{
+  "entries": {
+    "divide_policy": {
+      "composes": {},
+      "description": "",
+      "file": "divide_policy.txt",
+      "id": "divide_policy",
+      "placeholders": [
+        "level_names"
+      ],
+      "role": "task",
+      "sha256": "3f0cf8fb3176674691eafdb8c9ca19a4d8bc5503143081db60640d3daa2a120f",
+      "stage": "divide",
+      "version": 1
+    },
+    "expert_knowledge": {
+      "composes": {},
+      "description": "",
+      "file": "expert_knowledge.txt",
+      "id": "expert_knowledge",
+      "placeholders": [],
+      "role": "knowledge",
+      "sha256": "a3f95f54cdc3210aa1ae486e7aeb399870a21211ff4703625e57d72e3b18a8e3",
+      "stage": "optimize",
+      "version": 1
+    },
+    "expert_knowledge_abstract_old": {
+      "composes": {},
+      "description": "",
+      "file": "expert_knowledge_abstract_old.txt",
+      "id": "expert_knowledge_abstract_old",
+      "placeholders": [],
+      "role": "knowledge",
+      "sha256": "74c7ee4de7dd67985f5a13d35b4a11008a98e5bb9fa6e691b37c452a227274f3",
+      "stage": "optimize",
+      "version": 1
+    },
+    "fix_compile_errors": {
+      "composes": {},
+      "description": "",
+      "file": "fix_compile_errors.txt",
+      "id": "fix_compile_errors",
+      "placeholders": [
+        "compiler",
+        "cpp_standard",
+        "command",
+        "diagnostics"
+      ],
+      "role": "task",
+      "sha256": "8bd7f4e8d5e6462fd6b897d89bdfdd4af974fe447cb798b88460f94474b74ca6",
+      "stage": "query_codegen",
+      "version": 1
+    },
+    "optim_add_timings_collect_stats": {
+      "composes": {},
+      "description": "",
+      "file": "optim_add_timings_collect_stats.txt",
+      "id": "optim_add_timings_collect_stats",
+      "placeholders": [],
+      "role": "task",
+      "sha256": "442b32873db43f8ca7c39d6d808fb50447dc360d693e157cf2761dc667b5615f",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_add_timings_collect_stats_per_query": {
+      "composes": {},
+      "description": "",
+      "file": "optim_add_timings_collect_stats_per_query.txt",
+      "id": "optim_add_timings_collect_stats_per_query",
+      "placeholders": [
+        "qids_str",
+        "sf",
+        "refer_to_prev"
+      ],
+      "role": "task",
+      "sha256": "d11ea87883b0ae66074ea4e87f42c8f4a435c86ea6ec718cf2beb6da87645f75",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_constraints": {
+      "composes": {},
+      "description": "",
+      "file": "optim_constraints.txt",
+      "id": "optim_constraints",
+      "placeholders": [],
+      "role": "fragment",
+      "sha256": "a5b4315164216f2c579e57517d117dad56c388afeb81cf2478e243dc446b1725",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_pinning": {
+      "composes": {},
+      "description": "",
+      "file": "optim_pinning.txt",
+      "id": "optim_pinning",
+      "placeholders": [
+        "query_impl_path",
+        "affinity_prompt",
+        "core_id"
+      ],
+      "role": "task",
+      "sha256": "7887cc2865a73a14e8bc2f3e26b0bb7da7009a87d556bb6720e5e307e6d314cf",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_pretext_general": {
+      "composes": {},
+      "description": "",
+      "file": "optim_pretext_general.txt",
+      "id": "optim_pretext_general",
+      "placeholders": [
+        "queries_path",
+        "num_queries",
+        "query_str"
+      ],
+      "role": "fragment",
+      "sha256": "2b8c15efe22d200594931a7bd72256453176c7b889e424eeb8f21dfcec23c9d8",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_pretext_optim": {
+      "composes": {},
+      "description": "",
+      "file": "optim_pretext_optim.txt",
+      "id": "optim_pretext_optim",
+      "placeholders": [
+        "storage_layout"
+      ],
+      "role": "fragment",
+      "sha256": "86a2f7148dc454823e4a4ea5bb0050c8703ca1ae070389c3a9b8d09596196142",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_w_expert_knowledge": {
+      "composes": {
+        "constraints": "optim_constraints",
+        "expert_knowledge": "expert_knowledge"
+      },
+      "description": "",
+      "file": "optim_w_expert_knowledge.txt",
+      "id": "optim_w_expert_knowledge",
+      "placeholders": [
+        "constraints",
+        "query_id",
+        "expert_knowledge",
+        "target_rt",
+        "sf",
+        "current_rt",
+        "bespoke_storage_related"
+      ],
+      "role": "task",
+      "sha256": "657961e38b815aadba0cee074160e98b85b2712d5cc1dc9f9a03d8cbcdd91804",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_w_human_reference": {
+      "composes": {
+        "constraints": "optim_constraints"
+      },
+      "description": "",
+      "file": "optim_w_human_reference.txt",
+      "id": "optim_w_human_reference",
+      "placeholders": [
+        "constraints",
+        "query_id",
+        "target_rt",
+        "sf",
+        "current_rt",
+        "bespoke_storage_related"
+      ],
+      "role": "task",
+      "sha256": "2f3b748e38f4834e0548ff8a39ed9a7e323703ebb1bae58671f39768e02adfa0",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_w_trace": {
+      "composes": {
+        "constraints": "optim_constraints"
+      },
+      "description": "",
+      "file": "optim_w_trace.txt",
+      "id": "optim_w_trace",
+      "placeholders": [
+        "constraints",
+        "query_id",
+        "target_rt",
+        "sf",
+        "factor",
+        "current_rt",
+        "bespoke_storage_related"
+      ],
+      "role": "task",
+      "sha256": "292aff9f7f134fd734b797309a7b115df8f3db9ca5750662c0b89dd7f3aa3bdb",
+      "stage": "optimize",
+      "version": 1
+    },
+    "optim_with_sample_plan": {
+      "composes": {
+        "constraints": "optim_constraints"
+      },
+      "description": "",
+      "file": "optim_with_sample_plan.txt",
+      "id": "optim_with_sample_plan",
+      "placeholders": [
+        "constraints",
+        "query_id",
+        "sf",
+        "duckdb_plan"
+      ],
+      "role": "task",
+      "sha256": "4313f76f2e2e27ca5f065ae8958b8cc329f1948e990dcfd8626f5c83bbbee311",
+      "stage": "optimize",
+      "version": 1
+    },
+    "storage_plan_policy": {
+      "composes": {},
+      "description": "",
+      "file": "storage_plan_policy.txt",
+      "id": "storage_plan_policy",
+      "placeholders": [],
+      "role": "task",
+      "sha256": "f289e0b3c509e0524098345411ed1b1697b3305df216e12e40558834cffb7fa5",
+      "stage": "storage_plan",
+      "version": 1
+    }
+  },
+  "prompts_root": "../../prompts"
+}

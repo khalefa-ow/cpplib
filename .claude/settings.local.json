@@ -13,10 +13,45 @@
       "Bash(bash test_with_uv.sh)",
       "Bash(chmod +x /home/mk/cpp_tools/demo_cpp20_features.py)",
       "Bash(python demo_cpp20_features.py)",
-      "Bash(mv demo*.py examples/)"
+      "Bash(mv demo*.py examples/)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python -)",
+      "Bash(.venv/bin/python -m agent.cli doctor)",
+      "Bash(.venv/bin/python -m agent.cli run --config agent/examples/config.example.json --dry-run)",
+      "Bash(.venv/bin/python -m agent.cli run --config agent/examples/config.example.json --stages optimize --dry-run)",
+      "Bash(timeout 60 .venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python -m pytest tests/agent/test_agent_config.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/agent/test_agent_prompts.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/agent/test_agent_cache_trace.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/agent/test_agent_workspace.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/agent/test_agent_pipeline.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/ -q)",
+      "Bash(.venv/bin/python -m pytest tests/agent/test_agent_rlm.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/agent/test_agent_cli.py -q)",
+      "Bash(.venv/bin/black --check --line-length 100 agent/)",
+      "Bash(.venv/bin/black --check cpplib/)",
+      "Bash(.venv/bin/black --check --line-length 100 cpplib/)",
+      "Bash(.venv/bin/black --line-length 100 agent/ tests/agent/)",
+      "Bash(.venv/bin/flake8 agent/ tests/agent/)",
+      "Bash(echo \"\\(flake8 exit: $?\\)\")",
+      "Bash(python3 -)",
+      "Bash(.venv/bin/black --check --line-length 100 agent/ tests/agent/)",
+      "Bash(.venv/bin/mypy agent/)",
+      "Bash(awk '/^def normalize_legacy/,/^def load_config/' agent/config/loader.py)",
+      "Bash(xargs -I{} echo \"mypy errors in agent/: {}\")",
+      "Bash(.venv/bin/python -m pytest tests/agent -q)",
+      "Bash(sed -i 's/^197 tests, none needing an API key/236 tests, none needing an API key/' agent/README.md)",
+      "Bash(sed -i 's/pytest tests\\\\/agent -v              # 197 tests, no API key needed/pytest tests\\\\/agent -v              # 236 tests, no API key needed/' CLAUDE.md)",
+      "Bash(python -m agent.cli doctor --config agent/examples/config.example.json)",
+      "Bash(python -m agent.cli run --config agent/examples/config.example.json --dry-run)",
+      "Bash(cp /tmp/claude-1000/-home-mk-cpp-tools/67f24a28-2a84-4a9a-a21a-2484ea13a8ab/scratchpad/minimal.json agent/examples/minimal.tmp.json)",
+      "Bash(python -m agent.cli doctor --config agent/examples/minimal.tmp.json)",
+      "Bash(python -m agent.cli run --config agent/examples/minimal.tmp.json --dry-run)",
+      "Bash(rm agent/examples/minimal.tmp.json)"
     ],
     "additionalDirectories": [
       "/home/mk/cpp_tools"
     ]
-  }
+  },
+  "skillOverrides": {}
 }

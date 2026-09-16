@@ -82,6 +82,39 @@ cpplib/
 
 All 6 phases implemented and tested. cpplib is now a fully functional C++ code analysis and modification library with 70 passing tests.
 
+## `agent/` — DSPy workflow layer (separate package)
+
+A staged LLM pipeline built on top of cpplib: storage plan → divide into hint
+levels → generate storage-layout header → generate per-query C++ and fix until
+it compiles and matches DuckDB gold → optimize with hints. See
+[agent/README.md](agent/README.md).
+
+Status: skeleton complete. `storage_plan` runs end to end; `divide`, `hppgen`,
+`query_codegen` and `optimize` are wired with their contracts documented in
+their class docstrings and raise `StageNotImplemented`.
+
+```bash
+uv pip install -e ".[dev,agent]"   # dspy, duckdb, pyarrow
+python -m agent.cli doctor         # deno (required by dspy.RLM), cmake, g++, API keys
+python -m agent.cli run --config agent/examples/config.example.json --dry-run
+pytest tests/agent -v              # 236 tests, no API key needed
+```
+
+Notes for future work:
+- `agent/` is optional and dependency-isolated: cpplib itself stays tree-sitter
+  + pydantic only. Nothing in `cpplib/` imports from `agent/`.
+- `dspy.RLM` needs the **Deno** runtime; `agent.cli doctor` checks for it.
+- All LLM access goes through `agent/llm/lm_factory.py` (`configure_dspy`) and is
+  cached by `agent/llm/cache.py`. Do not call `dspy.configure` elsewhere.
+- `agent/rlm/workspace.py` documents and works around several cpplib defects
+  (`FileModifier` edit clobbering, no index invalidation, text-based function
+  lookup, `check_syntax` ignoring `-std=` and returning `None`). Those
+  workarounds have regression tests; fix the underlying cpplib bugs before
+  removing them.
+- Prompts live in `prompts/*.txt`, indexed by `agent/prompting/manifest.json`.
+  Run `python -m agent.cli prompts build` after editing any prompt, or the
+  registry will refuse to use a stale entry.
+
 ## Quick Commands
 
 ```bash

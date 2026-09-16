@@ -1,0 +1,112 @@
+{
+  "common": {
+    "base_dir": ".",
+    "inputs": {
+      "schema": "input/schema.txt",
+      "queries": "input/allqueries.txt",
+      "statistics": "input/statistics.txt"
+    },
+    "artifacts_dir": "out/artifacts",
+    "gen_project_root": "out/gen",
+    "levels": [
+      { "name": "no_hints", "namespace": "basic", "file": "storage_layout_basic.hpp" },
+      { "name": "organization_level", "namespace": "intermediate", "file": "storage_layout_interm.hpp" },
+      { "name": "all_hints", "namespace": "full", "file": "storage_layout_all.hpp" }
+    ],
+    "model": {
+      "name": "openai/gpt-5.3-codex",
+      "temperature": 1.0,
+      "max_tokens": 12000,
+      "api_key_env": "OPENAI_API_KEY",
+      "track_usage": true,
+      "lm_cache": true
+    },
+    "cache": {
+      "enabled": true,
+      "dir": "out/.cache",
+      "refresh": false
+    },
+    "trace": {
+      "path": "out/trace.jsonl",
+      "stdout": false,
+      "max_field_chars": 4000,
+      "enable_weave": false,
+      "enable_wandb": false
+    },
+    "rlm": {
+      "max_iterations": 20,
+      "max_llm_calls": 50,
+      "max_output_chars": 100000,
+      "threshold_chars": 100000,
+      "verbose": false,
+      "sub_model": {
+        "name": "openai/gpt-5.4-mini",
+        "temperature": 1.0
+      }
+    },
+    "compile": {
+      "compiler": "g++",
+      "cpp_standard": "c++20",
+      "include_dirs": [],
+      "extra_flags": ["-O2"],
+      "cmake_dir": "out/gen",
+      "build_dir": "out/gen/build",
+      "timeout_s": 300,
+      "max_fix_rounds": 2,
+      "clean_build": false
+    },
+    "gold": {
+      "mode": "duckdb",
+      "duckdb_path": "out/gold/gold.duckdb",
+      "dir": "out/gold",
+      "extension": ".csv",
+      "dataset_dir": "dataset/sf0.25",
+      "overwrite": false,
+      "install_spatial": false
+    }
+  },
+  "stages": {
+    "storage_plan": {
+      "enabled": true,
+      "prompt_ids": ["storage_plan_policy"],
+      "cache": { "dir": "out/.cache/storage_plan" }
+    },
+    "divide": {
+      "enabled": true,
+      "prompt_ids": ["divide_policy"],
+      "cache": { "dir": "out/.cache/divide" },
+      "outputs": { "schema_levels": "out/artifacts/schema_levels.json" }
+    },
+    "hppgen": {
+      "enabled": true,
+      "active_levels": ["no_hints"],
+      "cache": { "dir": "out/.cache/hppgen" }
+    },
+    "query_codegen": {
+      "enabled": true,
+      "active_levels": ["no_hints"],
+      "prompt_ids": ["fix_compile_errors"],
+      "cache": { "dir": "out/.cache/query_codegen" },
+      "params": {
+        "database_type_name": "Database",
+        "database_param_name": "db",
+        "query_namespace_prefix": "queries::",
+        "query_function_name": "run",
+        "float_tolerance": 1e-6,
+        "max_correctness_rounds": 3
+      }
+    },
+    "optimize": {
+      "enabled": true,
+      "prompt_ids": ["optim_w_trace"],
+      "cache": { "dir": "out/.cache/optimize" },
+      "params": {
+        "strategy": "trace",
+        "max_rounds": 4,
+        "min_improvement": 0.05,
+        "repeat_runs": 3,
+        "sf": "0.25"
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+region:    5 rows
+customer:  150000 rows;  c_mktsegment distinct=5;  c_regionkey distinct=5
+orders:    1500000 rows; o_orderstatus distinct=3; o_orderdate range=1992-01-01..1998-08-02
+join selectivity: orders -> customer is 10:1

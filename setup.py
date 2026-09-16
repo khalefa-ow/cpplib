@@ -27,5 +27,18 @@ setup(
             "flake8>=6.1.0",
             "mypy>=1.7.1",
         ],
+        # LLM workflow layer (the `agent` package). Kept optional so that
+        # cpplib itself stays a dependency-light tree-sitter library.
+        "agent": [
+            "dspy>=3.1,<4",
+            "duckdb>=1.1",
+            "pyarrow>=17",
+        ],
+        # Optional observability backends for the agent package. Never
+        # imported at module scope, so these stay genuinely optional.
+        "agent-trace": [
+            "weave",
+            "wandb",
+        ],
     },
 )

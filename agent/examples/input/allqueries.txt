@@ -1,0 +1,21 @@
+-- Q1: revenue by market segment
+SELECT c_mktsegment, SUM(o_totalprice) AS revenue
+FROM customer JOIN orders ON c_custkey = o_custkey
+GROUP BY c_mktsegment
+ORDER BY revenue DESC;
+
+-- Q2: order count per region for a date range
+SELECT r_name, COUNT(*) AS n_orders
+FROM region
+  JOIN customer ON r_regionkey = c_regionkey
+  JOIN orders   ON c_custkey  = o_custkey
+WHERE o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1995-12-31'
+GROUP BY r_name
+ORDER BY n_orders DESC;
+
+-- Q3: top customers by balance in one segment
+SELECT c_name, c_acctbal
+FROM customer
+WHERE c_mktsegment = 'BUILDING'
+ORDER BY c_acctbal DESC
+LIMIT 20;

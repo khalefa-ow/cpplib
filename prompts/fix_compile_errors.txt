@@ -1,0 +1,19 @@
+The code you generated does not build. Fix it.
+
+Compiler: ${compiler} with ${cpp_standard}
+Command that failed:
+${command}
+
+Diagnostics:
+${diagnostics}
+
+Rules for the fix:
+- Fix the cause, not the symptom. Do not silence a diagnostic by deleting the code that triggers it, by casting the type away, or by widening a signature until it compiles.
+- Do not change the input/output interface of the generated entry points.
+- Do not weaken the storage layout to make a query compile. If a query genuinely cannot be expressed against the current layout, say so explicitly instead of quietly changing the layout.
+- Keep the project buildable: if a fix requires a new include or a new declaration, add it.
+- Change as little as possible. A large rewrite hides which edit actually fixed the error.
+
+You have tools to read the current code by symbol and to recompile. Read the specific function or class named in each diagnostic before editing it — do not guess at the surrounding code. After editing, recompile and confirm the diagnostics are gone.
+
+If a diagnostic is a warning rather than an error and the code is correct as written, leave it and say why.

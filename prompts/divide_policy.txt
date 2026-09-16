@@ -1,0 +1,21 @@
+Policy: split inputs into hint levels.
+
+Level 1 — no_hints:
+- Use only schema facts (tables, columns, types, keys, constraints, relationships).
+- Do NOT include storage-plan hints, notes, optimization or implementation advice.
+
+Level 2 — organization_level:
+- Present organized schema facts using clear headings and groupings (Overview; Tables/Entities; Columns and Types; Keys and Constraints; Relationships).
+- Still do NOT include storage-plan hints or notes.
+
+Level 3 — all_hints:
+- Include schema facts plus all hints and notes present in the storage plan.
+- Do NOT invent new hints, storage decisions, indexes, layouts, encodings, or implementation details.
+- If something is only implied by the storage plan, mark it as "Implied by storage plan".
+
+For each level, also produce a short one-sentence data structure description for downstream code generation.
+
+Return valid JSON only, in this shape, using exactly the level names declared below:
+{"levels": {"<level_name>": "<level text>"}, "data_structure_descriptions": {"<level_name>": "<short data structure description>"}}
+
+Declared level names: ${level_names}
