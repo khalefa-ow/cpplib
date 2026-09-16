@@ -1,0 +1,25 @@
+Implement one SQL query as C++ against the generated storage layout.
+
+You are given the query, the storage-layout header it must use, and the hint level's description of that layout. Produce a single self-contained translation unit that executes the query over data already loaded in memory.
+
+Requirements:
+
+1. Interface
+   - Include the storage-layout header and use its types; do not redefine them.
+   - Expose exactly one entry point: `${entry_signature}`.
+   - Write results to the provided output stream, one row per line, columns separated by `${delimiter}`, in the order the query's SELECT list gives them.
+   - Print numeric values so they compare equal to the reference output: integers without a decimal point, and DECIMAL columns with their declared scale.
+   - ${header_rule}
+
+2. Execution
+   - Single-threaded. No SQL parsing at runtime: compile the query's plan into the code.
+   - Choose join order and build sides from the cardinalities you were given, smaller side as the hash build side.
+   - Respect the query's ORDER BY exactly; if it has none, emit rows in whatever order the plan produces.
+   - Apply filters as early as possible and touch only the columns the query needs.
+
+3. Constraints
+   - Do not modify the storage layout, and do not add per-query indexes, materialized results or precomputed lookup tables. The layout is shared by every query.
+   - Only the standard library. No external dependencies.
+   - No undefined behaviour: check bounds where the plan does not already guarantee them, and initialize every accumulator.
+
+Output only the C++ source for this one query. No prose, no markdown fences.
