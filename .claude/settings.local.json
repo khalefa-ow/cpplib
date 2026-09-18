@@ -47,7 +47,8 @@
       "Bash(cp /tmp/claude-1000/-home-mk-cpp-tools/67f24a28-2a84-4a9a-a21a-2484ea13a8ab/scratchpad/minimal.json agent/examples/minimal.tmp.json)",
       "Bash(python -m agent.cli doctor --config agent/examples/minimal.tmp.json)",
       "Bash(python -m agent.cli run --config agent/examples/minimal.tmp.json --dry-run)",
-      "Bash(rm agent/examples/minimal.tmp.json)"
+      "Bash(rm agent/examples/minimal.tmp.json)",
+      "Bash(chmod +x /home/mk/projects/cpp-tools/run_pipeline_step_by_step.sh)"
     ],
     "additionalDirectories": [
       "/home/mk/cpp_tools"
