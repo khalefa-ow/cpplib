@@ -25,6 +25,21 @@ from typing import Optional, Sequence
 from agent import __version__
 from agent.errors import AgentError
 
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, try manual loading
+    env_file = Path(".env")
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                key, _, value = line.partition("=")
+                if key:
+                    os.environ.setdefault(key, value)
+
 # --------------------------------------------------------------------------
 # doctor
 # --------------------------------------------------------------------------

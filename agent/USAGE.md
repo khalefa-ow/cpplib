@@ -49,9 +49,6 @@ If any check fails, install the missing tool or set the environment variable.
 ```bash
 # Development install with agent dependencies
 uv pip install -e ".[dev,agent]"
-
-# Or with pip
-pip install -e ".[dev,agent]"
 ```
 
 This installs:

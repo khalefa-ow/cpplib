@@ -18,7 +18,7 @@ A Python library for analyzing, extracting, and modifying C++ code with semantic
 # Clone and install
 git clone https://github.com/khalefa-ow/cpplib.git
 cd cpplib
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 
 # Run tests to verify
 pytest tests/ -v

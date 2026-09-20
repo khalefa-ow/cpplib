@@ -25,7 +25,7 @@ cpplib/
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 ```
 
 ## Quick Start

@@ -14,10 +14,10 @@
       { "name": "all_hints", "namespace": "full", "file": "storage_layout_all.hpp" }
     ],
     "model": {
-      "name": "openai/gpt-5.3-codex",
+      "name": "deepseek/deepseek-coder",
       "temperature": 1.0,
       "max_tokens": 12000,
-      "api_key_env": "OPENAI_API_KEY",
+      "api_key_env": "DEEPSEEK_API_KEY",
       "track_usage": true,
       "lm_cache": true
     },
@@ -40,7 +40,7 @@
       "threshold_chars": 100000,
       "verbose": false,
       "sub_model": {
-        "name": "openai/gpt-5.4-mini",
+        "name": "deepseek/deepseek-coder",
         "temperature": 1.0
       }
     },
@@ -85,8 +85,14 @@
     "query_codegen": {
       "enabled": true,
       "active_levels": ["no_hints"],
-      "prompt_ids": ["fix_compile_errors"],
+      "prompt_ids": ["query_codegen_task", "fix_compile_errors"],
       "cache": { "dir": "out/.cache/query_codegen" },
+      "prompt_vars": {
+        "compiler": "g++",
+        "cpp_standard": "c++20",
+        "command": "cmake --build out/gen/build && ./build/engine",
+        "diagnostics": "Use compiler error messages to fix issues"
+      },
       "params": {
         "run_command": "./build/engine --query {query_id} --out {output} --sf {sf}",
         "sf": "0.25",

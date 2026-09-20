@@ -3,7 +3,31 @@
 
 set -e
 
-CONFIG="${1:-agent/examples/config.example.json}"
+# Load environment variables from .env file
+if [ -f .env ]; then
+    export $(cat .env | grep -v '^#' | xargs)
+fi
+
+# Parse arguments
+CONFIG="agent/examples/config.example.json"
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dry)
+            DRY_RUN=true
+            shift
+            ;;
+        --config)
+            CONFIG="$2"
+            shift 2
+            ;;
+        *)
+            CONFIG="$1"
+            shift
+            ;;
+    esac
+done
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
@@ -27,7 +51,7 @@ run_stage() {
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${GREEN}Running $stage...${NC}\n"
-        python -m agent.cli run --config "$CONFIG" --stages "$stage"
+        uv run python3 -m agent.cli run --config "$CONFIG" --stages "$stage"
         echo -e "\n${GREEN}✓ $stage completed${NC}\n"
         return 0
     else
@@ -40,35 +64,53 @@ run_stage() {
 echo -e "${YELLOW}>>> Pre-flight checks${NC}"
 echo "Validating config and environment..."
 echo ""
-python -m agent.cli doctor || { echo "Failed! Install missing tools and try again."; exit 1; }
+uv run python3 -m agent.cli doctor || { echo "Failed! Install missing tools and try again."; exit 1; }
 echo ""
 
-read -p "Rebuild prompts from source? (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    python -m agent.cli prompts build
-    echo ""
+if [ "$DRY_RUN" = false ]; then
+    read -p "Rebuild prompts from source? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        uv run python3 -m agent.cli prompts build
+        echo ""
+    fi
+else
+    echo "(skipped prompts rebuild - dry run mode)"
 fi
 
 # Show config
 echo -e "${YELLOW}>>> Config Overview${NC}"
-python -m agent.cli config show "$CONFIG" | head -100
-echo ""
+if [ "$DRY_RUN" = false ]; then
+    uv run python3 -m agent.cli config show --config "$CONFIG" | head -100
+    echo ""
 
-read -p "Show full config? (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    python -m agent.cli config show "$CONFIG"
+    read -p "Show full config? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        uv run python3 -m agent.cli config show --config "$CONFIG"
+        echo ""
+    fi
+else
+    echo "Config: $CONFIG"
+    echo "(full config display skipped - dry run mode)"
     echo ""
 fi
 
 # Dry run
-read -p "Run dry-run first? (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+if [ "$DRY_RUN" = true ]; then
     echo -e "${GREEN}Running dry-run (no API calls)...${NC}\n"
-    python -m agent.cli run --config "$CONFIG" --dry-run
+    uv run python3 -m agent.cli run --config "$CONFIG" --dry-run
     echo ""
+    echo "Dry-run complete. Exiting."
+    exit 0
+else
+    read -p "Run dry-run first? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${GREEN}Running dry-run (no API calls)...${NC}\n"
+        uv run python3 -m agent.cli run --config "$CONFIG" --dry-run
+        echo ""
+    fi
 fi
 
 # Stage 1: storage_plan
@@ -80,9 +122,9 @@ if [ $? -eq 0 ]; then
     read -p "View the storage plan? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        python -m agent.cli config show "$CONFIG" | grep artifacts_dir
+        uv run python3 -m agent.cli config show --config "$CONFIG" | grep artifacts_dir
         # Extract artifacts dir from config
-        artifacts_dir=$(python -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
+        artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
         if [ -f "$artifacts_dir/storage_plan.json" ]; then
             echo ""
             cat "$artifacts_dir/storage_plan.json" | jq . 2>/dev/null | head -80
@@ -101,7 +143,7 @@ if [ $? -eq 0 ]; then
     read -p "View schema levels? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        artifacts_dir=$(python -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
+        artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
         if [ -f "$artifacts_dir/schema_levels.json" ]; then
             cat "$artifacts_dir/schema_levels.json" | jq . 2>/dev/null | head -80
         fi
@@ -118,7 +160,7 @@ if [ $? -eq 0 ]; then
     read -p "View generated header? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        gen_root=$(python -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('gen_project_root', 'out/gen'))")
+        gen_root=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('gen_project_root', 'out/gen'))")
         header_file=$(ls "$gen_root/include/storage_layout_"*.hpp 2>/dev/null | head -1)
         if [ -f "$header_file" ]; then
             echo "File: $header_file"
@@ -129,45 +171,56 @@ fi
 echo ""
 
 # Stage 4: query_codegen
-echo -e "${YELLOW}>>> Stage: query_codegen${NC}"
-echo "4️⃣  Query Code Generation - Generates and verifies C++ query implementations
+run_stage "query_codegen" \
+    "4️⃣  Query Code Generation - Generates and verifies C++ query implementations using DuckDB
    Input: Headers from hppgen, schema levels
    Output: Generated .cpp files, correctness_report.json"
-echo ""
-echo "⚠️  This stage requires:"
-echo "   - Gold results (DuckDB database or precomputed CSVs)"
-echo "   - A working query engine to execute"
-echo ""
-echo "For now, skipping query_codegen. When ready:"
-echo "   1. Set up gold results in your config (see USAGE.md)"
-echo "   2. Run: python -m agent.cli run --config $CONFIG --stages query_codegen"
+if [ $? -eq 0 ]; then
+    read -p "View correctness report? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
+        if [ -f "$artifacts_dir/correctness_report.json" ]; then
+            cat "$artifacts_dir/correctness_report.json" | jq . 2>/dev/null | head -100
+        fi
+    fi
+fi
 echo ""
 
 # Stage 5: optimize
-echo -e "${YELLOW}>>> Stage: optimize${NC}"
-echo "5️⃣  Optimization - Proposes and measures performance improvements
+run_stage "optimize" \
+    "5️⃣  Optimization - Proposes and measures performance improvements using query traces
    Input: Verified queries from query_codegen
    Output: optimization_report.json"
-echo ""
-echo "⚠️  This stage requires all queries to pass correctness checks"
+if [ $? -eq 0 ]; then
+    read -p "View optimization report? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
+        if [ -f "$artifacts_dir/optimization_report.json" ]; then
+            cat "$artifacts_dir/optimization_report.json" | jq . 2>/dev/null | head -100
+        fi
+    fi
+fi
 echo ""
 
 # Summary
 echo -e "${GREEN}=== Pipeline Overview ===${NC}"
 echo "Artifacts directory:"
-artifacts_dir=$(python -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
+artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
 ls -lh "$artifacts_dir" 2>/dev/null || echo "(not yet created)"
 echo ""
 echo "Generated C++ directory:"
-gen_root=$(python -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('gen_project_root', 'out/gen'))")
+gen_root=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('gen_project_root', 'out/gen'))")
 ls -lh "$gen_root" 2>/dev/null || echo "(not yet created)"
 echo ""
 
-echo -e "${GREEN}Done! Next steps:${NC}"
-echo "  1. Review the generated artifacts"
-echo "  2. Set up gold results (see USAGE.md)"
-echo "  3. Build your query engine"
-echo "  4. Configure and run query_codegen and optimize"
+echo -e "${GREEN}Pipeline complete! Next steps:${NC}"
+echo "  1. Review the generated artifacts in: $artifacts_dir"
+echo "  2. Check the correctness and optimization reports"
+echo "  3. Iterate on storage layout and query optimization"
 echo ""
-echo "Full guide: STEP_BY_STEP.md"
-echo "Detailed docs: agent/USAGE.md"
+echo "📚 Documentation:"
+echo "  - Full guide: STEP_BY_STEP.md"
+echo "  - Detailed docs: agent/USAGE.md"
+echo "  - Configuration: agent/examples/config.example.json"

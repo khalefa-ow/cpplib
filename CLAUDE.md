@@ -134,7 +134,7 @@ Notes for future work:
 
 ```bash
 # Install development dependencies
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 
 # Run tests
 pytest tests/ -v

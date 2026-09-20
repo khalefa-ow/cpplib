@@ -48,7 +48,11 @@
       "Bash(python -m agent.cli doctor --config agent/examples/minimal.tmp.json)",
       "Bash(python -m agent.cli run --config agent/examples/minimal.tmp.json --dry-run)",
       "Bash(rm agent/examples/minimal.tmp.json)",
-      "Bash(chmod +x /home/mk/projects/cpp-tools/run_pipeline_step_by_step.sh)"
+      "Bash(chmod +x /home/mk/projects/cpp-tools/run_pipeline_step_by_step.sh)",
+      "Bash(python3 -c \"import cpplib\")",
+      "Bash(uv run *)",
+      "Bash(python3 -m json.tool agent/examples/config.example.json)",
+      "Bash(python3)"
     ],
     "additionalDirectories": [
       "/home/mk/cpp_tools"
