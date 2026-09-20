@@ -7,7 +7,7 @@
       "statistics": "input/statistics.txt"
     },
     "artifacts_dir": "out/artifacts",
-    "gen_project_root": "out/gen",
+    "gen_project_root": "./out/gen",
     "levels": [
       { "name": "no_hints", "namespace": "basic", "file": "storage_layout_basic.hpp" },
       { "name": "organization_level", "namespace": "intermediate", "file": "storage_layout_interm.hpp" },
@@ -57,10 +57,10 @@
     },
     "gold": {
       "mode": "duckdb",
-      "duckdb_path": "out/gold/gold.duckdb",
-      "dir": "out/gold",
+      "duckdb_path": "./out/gold/gold.duckdb",
+      "dir": "./out/gold",
       "extension": ".csv",
-      "dataset_dir": "dataset/sf0.25",
+      "dataset_dir": "./dataset/sf0.25",
       "overwrite": false,
       "install_spatial": false
     }
@@ -90,11 +90,11 @@
       "prompt_vars": {
         "compiler": "g++",
         "cpp_standard": "c++20",
-        "command": "cmake --build out/gen/build && ./build/engine",
+        "command": "cmake --build out/gen/build",
         "diagnostics": "Use compiler error messages to fix issues"
       },
       "params": {
-        "run_command": "./build/engine --query {query_id} --out {output} --sf {sf}",
+        "run_command": "build/engine --query {query_id} --out {output} --sf {sf} --dataset {dataset_dir}",
         "sf": "0.25",
         "source_dir": "src/queries",
         "build_project": "auto",
@@ -105,7 +105,7 @@
         "header_mode": "gold",
         "sort_rows": false,
         "float_tolerance": 1e-6,
-        "max_correctness_rounds": 3
+        "max_correctness_rounds": 5
       }
     },
     "optimize": {

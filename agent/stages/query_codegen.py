@@ -142,6 +142,11 @@ class QueryCodegenStage(Stage):
         if not queries:
             return self._fail(f"No SQL statements found in {queries_path}.", started)
 
+        # Set up build environment (CMakeLists.txt, query wrappers, dispatch code)
+        if not self._setup_build_environment(workspace, queries):
+            # Fallback: not critical, queries may still compile individually
+            pass
+
         split = inputs["schema_levels"].read_json()
         level_text = str((split.get(LEVELS_KEY) or {}).get(level.name, ""))
         description = str((split.get(DESCRIPTIONS_KEY) or {}).get(level.name, ""))
@@ -614,6 +619,88 @@ class QueryCodegenStage(Stage):
         if not self.cfg.params.get("rlm_tools"):
             return None
         return self.ctx.workspace_for(self.cfg)
+
+    def _setup_build_environment(self, workspace: Any, queries: list[Query]) -> bool:
+        """Generate CMakeLists.txt, query wrappers, and dispatch code if needed.
+
+        Returns True if setup was successful, False otherwise.
+        """
+        cmake_path = Path(self.cfg.compile.cmake_dir or workspace.cmake_dir) / "CMakeLists.txt"
+        if cmake_path.exists():
+            return True  # Already set up
+
+        try:
+            import re
+
+            # Discover query files
+            queries_dir = Path(self.cfg.compile.cmake_dir or workspace.cmake_dir) / "src" / "queries"
+            query_files = sorted(queries_dir.glob("q*.cpp"))
+            if not query_files:
+                return False  # No queries to build
+
+            # Generate CMakeLists.txt dynamically
+            query_sources = "\n  ".join(f"src/queries/{f.name}" for f in query_files)
+            wrapped_sources = "\n  ".join(f"q{i}_wrapped.cpp" for i in range(1, len(query_files) + 1))
+
+            cmake_content = f"""cmake_minimum_required(VERSION 3.15)
+project(QueryEngine)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Main executable with query dispatch
+add_executable(engine
+  ${{CMAKE_CURRENT_SOURCE_DIR}}/src/main.cpp
+  ${{CMAKE_CURRENT_SOURCE_DIR}}/query_dispatch.cpp
+  {wrapped_sources}
+)
+
+target_include_directories(engine PRIVATE ${{CMAKE_CURRENT_SOURCE_DIR}})
+"""
+            cmake_path.write_text(cmake_content)
+
+            # Wrap each query file with unique namespace
+            for i, qfile in enumerate(query_files, 1):
+                content = qfile.read_text()
+                wrapped = content.replace(
+                    "namespace queries {", f"namespace q{i}_namespace {{"
+                )
+                wrapped_path = cmake_path.parent / f"q{i}_wrapped.cpp"
+                wrapped_path.write_text(wrapped)
+
+            # Generate dispatch code
+            forward_decls = "\n".join(
+                f"namespace q{i}_namespace {{ void run(const basic::Database& db, std::ostream& out); }}"
+                for i in range(1, len(query_files) + 1)
+            )
+
+            dispatch_cases = "\n  ".join(
+                f'if (query_id == "q{i}" || query_id == "{i}") return q{i}_namespace::run;'
+                for i in range(1, len(query_files) + 1)
+            )
+
+            dispatch_content = f'''#include "storage_layout_basic.hpp"
+#include <string>
+#include <ostream>
+
+{forward_decls}
+
+typedef void (*QueryFunc)(const basic::Database&, std::ostream&);
+
+QueryFunc get_query_func(const std::string& query_id) {{
+  {dispatch_cases}
+  return nullptr;
+}}
+'''
+            dispatch_path = cmake_path.parent / "query_dispatch.cpp"
+            dispatch_path.write_text(dispatch_content)
+
+            return True
+        except Exception as e:
+            from agent.trace.span import set_error
+
+            set_error(f"Build setup failed: {e}")
+            return False
 
     def _fail(self, error: str, started: float) -> StageResult:
         return self.make_result(

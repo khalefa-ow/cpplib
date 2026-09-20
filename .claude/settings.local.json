@@ -52,10 +52,40 @@
       "Bash(python3 -c \"import cpplib\")",
       "Bash(uv run *)",
       "Bash(python3 -m json.tool agent/examples/config.example.json)",
-      "Bash(python3)"
+      "Bash(python3)",
+      "Bash(python3 prepare_build.py)",
+      "Bash(rm -rf build)",
+      "Bash(mkdir build *)",
+      "Bash(cmake ..)",
+      "Bash(make)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 convert_dataset.py)",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); print\\(data['queries']['q1']['report']\\)\")",
+      "Bash(cd /home/mk/projects/cpp-tools/agent/examples/out/gen && rm -rf CMakeLists.txt q*_wrapped.cpp query_dispatch.cpp wrap_query.cmake prepare_build.py build)",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q1 --out /tmp/test_output.csv --sf 0.25)",
+      "Read(//tmp/**)",
+      "Bash(mkdir -p /tmp/query_output)",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q1 --out /tmp/query_output/q1.csv --sf 0.25)",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q2 --out /tmp/query_output/q2.csv --sf 0.25)",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q3 --out /tmp/query_output/q3.csv --sf 0.25)",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q1 --out /tmp/query_output/q1.csv --sf 0.25 --dataset agent/examples/dataset/sf0.25)",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q2 --out /tmp/query_output/q2.csv --sf 0.25 --dataset agent/examples/dataset/sf0.25)",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q3 --out /tmp/query_output/q3.csv --sf 0.25 --dataset agent/examples/dataset/sf0.25)",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); print\\('Q1 first mismatch:', json.dumps\\(data['queries']['q1'].get\\('mismatch', {}\\).get\\('first_row_diff', 'N/A'\\), indent=2\\)\\)\")",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); m=data['queries']['q1'].get\\('mismatch', {}\\); print\\('Mismatch details:', json.dumps\\(m, indent=2\\)\\)\")",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); print\\('Q1 gold:', data['queries']['q1']['gold']\\); print\\('Q1 report:', data['queries']['q1']['report']\\)\")",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); m=data['queries']['q1'].get\\('mismatch', {}\\); print\\('Q1 Mismatch reason:', m.get\\('reason', 'N/A'\\)\\); print\\('Expected rows:', m.get\\('expected_shape', [0,0]\\)[0]\\); print\\('Actual rows:', m.get\\('actual_shape', [0,0]\\)[0]\\)\")",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); qs=data['queries']; print\\('Status summary:'\\); [print\\(f'  {qid}: {q[\\\\\"status\\\\\"]}'\\) for qid, q in qs.items\\(\\)]\")",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); m=data['queries']['q2'].get\\('mismatch', {}\\); print\\('Q2 Mismatch:'\\); print\\('  Reason:', m.get\\('reason', 'N/A'\\)\\); print\\('  Expected rows:', m.get\\('expected_shape', [0,0]\\)[0]\\); print\\('  Actual rows:', m.get\\('actual_shape', [0,0]\\)[0]\\); print\\('  Column:', m.get\\('column_name', 'N/A'\\)\\); print\\('  First diff:', m.get\\('first_row_diff', 'N/A'\\)\\)\")",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q2 --out /tmp/q2_test.csv --sf 0.25 --dataset /home/mk/projects/cpp-tools/agent/examples/dataset/sf0.25)",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); print\\('Run command:', data['run_command']\\)\")",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); qs=data['queries']; print\\('Statuses:'\\); [print\\(f'  {qid}: {q[\\\\\"status\\\\\"]} \\(rounds: {q[\\\\\"correctness_rounds\\\\\"]}\\)'\\) for qid, q in sorted\\(qs.items\\(\\)\\)]\")",
+      "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); m=data['queries']['q2'].get\\('mismatch', {}\\); print\\('Q2 Mismatch:'\\); print\\('  Reason:', m.get\\('reason', 'N/A'\\)\\); print\\('  Expected rows:', m.get\\('expected_shape', [0,0]\\)[0]\\); print\\('  Actual rows:', m.get\\('actual_shape', [0,0]\\)[0]\\)\")",
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q2 --out /tmp/q2_manual.csv --sf 0.25 --dataset agent/examples/dataset/sf0.25)"
     ],
     "additionalDirectories": [
-      "/home/mk/cpp_tools"
+      "/home/mk/cpp_tools",
+      "/home/mk/projects/cpp-tools/agent/examples/out/gen/build"
     ]
   },
   "skillOverrides": {}
