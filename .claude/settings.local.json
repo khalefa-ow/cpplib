@@ -81,7 +81,8 @@
       "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); print\\('Run command:', data['run_command']\\)\")",
       "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); qs=data['queries']; print\\('Statuses:'\\); [print\\(f'  {qid}: {q[\\\\\"status\\\\\"]} \\(rounds: {q[\\\\\"correctness_rounds\\\\\"]}\\)'\\) for qid, q in sorted\\(qs.items\\(\\)\\)]\")",
       "Bash(python3 -c \"import sys, json; data=json.load\\(sys.stdin\\); m=data['queries']['q2'].get\\('mismatch', {}\\); print\\('Q2 Mismatch:'\\); print\\('  Reason:', m.get\\('reason', 'N/A'\\)\\); print\\('  Expected rows:', m.get\\('expected_shape', [0,0]\\)[0]\\); print\\('  Actual rows:', m.get\\('actual_shape', [0,0]\\)[0]\\)\")",
-      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q2 --out /tmp/q2_manual.csv --sf 0.25 --dataset agent/examples/dataset/sf0.25)"
+      "Bash(/home/mk/projects/cpp-tools/agent/examples/out/gen/build/engine --query q2 --out /tmp/q2_manual.csv --sf 0.25 --dataset agent/examples/dataset/sf0.25)",
+      "Bash(python3 -m agent.cli prompts build)"
     ],
     "additionalDirectories": [
       "/home/mk/cpp_tools",

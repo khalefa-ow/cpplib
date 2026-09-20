@@ -47,9 +47,9 @@
         "diagnostics"
       ],
       "role": "task",
-      "sha256": "8bd7f4e8d5e6462fd6b897d89bdfdd4af974fe447cb798b88460f94474b74ca6",
+      "sha256": "f77abe5d238a751e17faf5b8636d98bbb3f4fa29fea1d6e5e4145b77e04d967d",
       "stage": "query_codegen",
-      "version": 1
+      "version": 3
     },
     "hppgen_policy": {
       "composes": {},
@@ -234,9 +234,9 @@
         "header_rule"
       ],
       "role": "task",
-      "sha256": "730f9a40b1a0f0a60628287c7be53fbaa8322917f7c231991138026061004ef5",
+      "sha256": "9bad9d99a2ed5ef791950bf2296996c0676850fbc60c1c4e8b7b42de7adbf1c9",
       "stage": "query_codegen",
-      "version": 1
+      "version": 3
     },
     "storage_plan_policy": {
       "composes": {},

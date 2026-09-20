@@ -97,7 +97,8 @@ def parse_table(text: str, delimiter: str = ",", source: str = "") -> ResultTabl
     delimiter survives — customer names with commas in them are exactly the case
     that makes a hand-rolled splitter report a phantom mismatch.
     """
-    cleaned = text.replace("\r\n", "\n").strip("\n")
+    # Normalize line endings: convert CRLF to LF, then remove any remaining CR
+    cleaned = text.replace("\r\n", "\n").replace("\r", "").strip("\n")
     if not cleaned.strip():
         return ResultTable(rows=[], source=source)
     reader = csv.reader(io.StringIO(cleaned), delimiter=delimiter)
@@ -108,7 +109,10 @@ def parse_table(text: str, delimiter: str = ",", source: str = "") -> ResultTabl
 def load_table(path: str | Path, delimiter: str = ",") -> ResultTable:
     """Read a result file from disk."""
     file = Path(path)
-    return parse_table(file.read_text(encoding="utf-8", errors="replace"), delimiter, str(file))
+    # Normalize line endings before parsing
+    text = file.read_text(encoding="utf-8", errors="replace")
+    text = text.replace("\r\n", "\n").replace("\r", "")
+    return parse_table(text, delimiter, str(file))
 
 
 def compare_tables(

@@ -7,7 +7,10 @@ Requirements:
 1. Interface
    - Include the storage-layout header and use its types; do not redefine them.
    - Expose exactly one entry point: `${entry_signature}`.
-   - Write results to the provided output stream, one row per line, columns separated by `${delimiter}`, in the order the query's SELECT list gives them.
+   - Write results to the provided output stream, one row per line.
+   - CRITICAL: Columns MUST be separated by a SINGLE CHARACTER: '${delimiter}' (comma).
+   - Do NOT use pipes, spaces, or any other separator. Output format: column1,column2,column3
+   - For string columns: trim all trailing whitespace, control characters, newlines and carriage returns before output.
    - Print numeric values so they compare equal to the reference output: integers without a decimal point, and DECIMAL columns with their declared scale.
    - ${header_rule}
 

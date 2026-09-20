@@ -1,10 +1,10 @@
-The code you generated does not build. Fix it.
+The code you generated has an issue. Fix it.
 
 Compiler: ${compiler} with ${cpp_standard}
 Command that failed:
 ${command}
 
-Diagnostics:
+Diagnostics or Verification Issue:
 ${diagnostics}
 
 Rules for the fix:
@@ -17,3 +17,9 @@ Rules for the fix:
 You have tools to read the current code by symbol and to recompile. Read the specific function or class named in each diagnostic before editing it — do not guess at the surrounding code. After editing, recompile and confirm the diagnostics are gone.
 
 If a diagnostic is a warning rather than an error and the code is correct as written, leave it and say why.
+
+COMMON ISSUES WITH OUTPUT FORMAT:
+- If the comparison shows "row count differs", check your output delimiter. It MUST be a single comma ','.
+  Never use pipes '|', spaces, or other characters.
+- If parsing shows wrong column count, the delimiter in your code may be wrong.
+- Strip trailing whitespace and control characters (including \r, \n) from string columns before output.
