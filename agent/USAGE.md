@@ -11,7 +11,7 @@ uv pip install -e ".[dev,agent]"
 # 2. Check your environment
 python -m agent.cli doctor
 
-# 3. Rebuild prompts (after editing any)
+# 3. (optional) Resync a prompt's placeholders after editing its text
 python -m agent.cli prompts build
 
 # 4. Try a dry run (no API calls)
@@ -391,16 +391,32 @@ Results are matched by query ID and checked cell-by-cell.
 
 ## Prompts
 
-Prompts are text files in `agent/prompts/` with metadata in `agent/prompting/manifest.json`.
+Prompt text lives inline in `agent/prompting/manifest.json` — each entry has a
+`text` field holding the full template plus its metadata (stage, role,
+placeholders, composes, version). There is no separate `prompts/` directory
+of `.txt` files, and no stored content hash: the cache fingerprint hashes
+`text` directly, so an edit invalidates the right cache entries the moment
+it's saved.
 
 ### Editing Prompts
 
-1. Edit the `.txt` file
-2. Rebuild the manifest:
-   ```bash
-   python -m agent.cli prompts build
-   ```
-3. Re-run: the new prompt invalidates the cache automatically
+```bash
+# Add or update one prompt from a local file
+python -m agent.cli prompts set query_codegen_task --file draft.txt
+
+# Or set the text directly
+python -m agent.cli prompts set my_prompt --text "Summarize \${topic}."
+
+# Resync the informational placeholders list and re-validate $-escaping
+# after any text edit (including a hand edit of the manifest's text field)
+python -m agent.cli prompts build
+```
+
+Re-running the pipeline afterward invalidates the cache automatically for any
+stage that depends on the edited prompt — no rebuild required for that part.
+
+Bulk-importing an external directory of `.txt` files (e.g. migrating a prompt
+corpus in) is still supported: `python -m agent.cli prompts build --prompts-dir <dir>`.
 
 ### Viewing Prompts
 
@@ -411,8 +427,8 @@ python -m agent.cli prompts list
 # Show a prompt with substitutions
 python -m agent.cli prompts show storage_plan_policy --var schema="..." --var queries="..."
 
-# Show just the text
-python -m agent.cli prompts show storage_plan_policy --text-only
+# Show the unrendered template
+python -m agent.cli prompts show storage_plan_policy --raw
 ```
 
 ## Caching & Resumption

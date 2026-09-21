@@ -82,16 +82,21 @@ def _signature_class() -> Any:
 class QueryCodegenStage(Stage):
     """Generate a C++ implementation per query, then fix it until it is correct.
 
+    Supports one or more hint levels sequentially. Each level generates separate
+    code into separate output directories. To generate multiple levels from a
+    single config, list them all in ``stages.query_codegen.active_levels``; the
+    stage will iterate through each one automatically.
+
     Requires: ``schema_levels``, ``storage_layout_headers``.
     Produces: ``query_sources``, ``correctness_report``.
 
     Config:
         ``common.inputs.queries`` - the workload, split into queries whose
             ``-- Q<n>`` headers become the ids used throughout the report.
-        ``stages.query_codegen.active_levels`` - exactly one level. Generating
-            several levels into one tree would collide on filenames and on the
-            build; run the pipeline once per level with its own
-            ``artifacts_dir`` and ``gen_project_root`` instead.
+        ``stages.query_codegen.active_levels`` - one or more levels. When
+            multiple levels are specified, they are generated sequentially,
+            each into a separate subdirectory under ``gen_project_root``.
+            For backward compatibility, a single level works as before.
         ``common.gold`` - where reference results come from. See
             :class:`agent.stages.gold.GoldProvider`.
         ``compile.max_fix_rounds`` - compile and link repair budget per query.
@@ -114,9 +119,10 @@ class QueryCodegenStage(Stage):
             ``rlm_tools`` - hand the model the workspace tools as well.
 
     Output artifacts:
-        ``query_sources`` - ``{"level":..., "sources": {"<query id>": path}}``.
-        ``correctness_report`` - per query: status, round counts, the first
-            mismatch, and the gold file it was compared against.
+        ``query_sources`` - list of artifacts, one per level:
+            ``{"level":..., "sources": {"<query id>": path}}``.
+        ``correctness_report`` - per query per level: status, round counts,
+            the first mismatch, and the gold file it was compared against.
     """
 
     name = "query_codegen"
@@ -130,7 +136,9 @@ class QueryCodegenStage(Stage):
         cfg = self.cfg
 
         try:
-            level = self._single_level()
+            levels = self._get_levels()
+            if not levels:
+                raise ValueError("No active levels configured for query_codegen")
             workspace = self.ctx.workspace_for(cfg)
         except Exception as exc:
             return self._fail(str(exc), started)
@@ -142,127 +150,176 @@ class QueryCodegenStage(Stage):
         if not queries:
             return self._fail(f"No SQL statements found in {queries_path}.", started)
 
-        # Set up build environment (CMakeLists.txt, query wrappers, dispatch code)
-        if not self._setup_build_environment(workspace, queries):
-            # Fallback: not critical, queries may still compile individually
-            pass
-
         split = inputs["schema_levels"].read_json()
-        level_text = str((split.get(LEVELS_KEY) or {}).get(level.name, ""))
-        description = str((split.get(DESCRIPTIONS_KEY) or {}).get(level.name, ""))
-        if not level_text.strip():
-            return self._fail(
-                f"The schema_levels artifact has no text for level '{level.name}'.", started
-            )
-
         headers = inputs["storage_layout_headers"].read_json().get("headers") or {}
-        header_path = headers.get(level.name)
-        if not header_path or not Path(header_path).exists():
-            return self._fail(
-                f"No generated header for level '{level.name}' at {header_path!r}. "
-                f"Run hppgen for this level first.",
-                started,
-            )
-        header_text = Path(header_path).read_text(encoding="utf-8", errors="replace")
-
         gold = self._gold(queries)
         runner = self._runner()
-        task = self.registry.render_any(
-            self.prompt_ids()[0] if self.prompt_ids() else None,
-            inline=cfg.params.get("task"),
-            entry_signature=self._entry_signature(level),
-            delimiter=self._param("delimiter", ","),
-            header_rule=self._header_rule(),
-        )
 
-        sources: dict[str, str] = {}
-        report: dict[str, Any] = {}
-        metrics: dict[str, Any] = {}
+        # Collect all level results
+        all_level_results = []
 
         with stage_context(self.name):
-            for query in queries:
-                with new_span("query", query.id):
-                    row = self._process_query(
-                        query=query,
-                        level=level,
-                        level_text=level_text,
-                        description=description,
-                        header_path=Path(header_path),
-                        header_text=header_text,
-                        task_text=task.text,
-                        task_fingerprint=task.fingerprint,
-                        gold=gold,
-                        runner=runner,
-                        workspace=workspace,
+            for level in levels:
+                # The auto-generated CMake dispatch build assumes one set of
+                # query sources for the whole project; it isn't level-aware,
+                # so with several active levels it is skipped in favor of
+                # each query compiling on its own via run_command. Single
+                # level runs keep the original auto-setup behavior.
+                if len(levels) == 1:
+                    if not self._setup_build_environment(workspace, queries, level=level):
+                        # Fallback: not critical, queries may still compile individually
+                        pass
+
+                level_text = str((split.get(LEVELS_KEY) or {}).get(level.name, ""))
+                description = str((split.get(DESCRIPTIONS_KEY) or {}).get(level.name, ""))
+                if not level_text.strip():
+                    return self._fail(
+                        f"The schema_levels artifact has no text for level '{level.name}'.",
+                        started,
                     )
-                report[query.id] = row
-                if row.get("source"):
-                    sources[query.id] = row["source"]
 
-        counts = _tally(report)
-        verified = counts.get(STATUS_MATCHED, 0) == len(queries)
-        unverified = counts.get(STATUS_UNVERIFIED, 0) + counts.get(STATUS_NO_GOLD, 0)
+                header_path = headers.get(level.name)
+                if not header_path or not Path(header_path).exists():
+                    return self._fail(
+                        f"No generated header for level '{level.name}' at {header_path!r}. "
+                        f"Run hppgen for this level first.",
+                        started,
+                    )
+                header_text = Path(header_path).read_text(encoding="utf-8", errors="replace")
 
-        broken = [
-            qid
-            for qid, row in report.items()
-            if row["status"] in (STATUS_COMPILE_FAILED, STATUS_BUILD_FAILED, STATUS_RUN_FAILED)
-        ]
-        mismatched = [qid for qid, row in report.items() if row["status"] == STATUS_MISMATCH]
+                task = self.registry.render_any(
+                    self.prompt_ids()[0] if self.prompt_ids() else None,
+                    inline=cfg.params.get("task"),
+                    entry_signature=self._entry_signature(level),
+                    delimiter=self._param("delimiter", ","),
+                    header_rule=self._header_rule(),
+                )
 
-        meta: dict[str, Any] = {
-            "model": cfg.model.name,
-            "prompt_ids": list(task.prompt_ids),
-            "level": level.name,
-            "run_id": self.ctx.run_id,
+                sources: dict[str, str] = {}
+                report: dict[str, Any] = {}
+
+                with new_span("level", level.name, writer=self.writer):
+                    for query in queries:
+                        with new_span("query", query.id, writer=self.writer):
+                            row = self._process_query(
+                                query=query,
+                                level=level,
+                                level_text=level_text,
+                                description=description,
+                                header_path=Path(header_path),
+                                header_text=header_text,
+                                task_text=task.text,
+                                task_fingerprint=task.fingerprint,
+                                gold=gold,
+                                runner=runner,
+                                workspace=workspace,
+                            )
+                        report[query.id] = row
+                        if row.get("source"):
+                            sources[query.id] = row["source"]
+
+                counts = _tally(report)
+                verified = counts.get(STATUS_MATCHED, 0) == len(queries)
+                unverified = counts.get(STATUS_UNVERIFIED, 0) + counts.get(STATUS_NO_GOLD, 0)
+
+                broken = [
+                    qid
+                    for qid, row in report.items()
+                    if row["status"] in (STATUS_COMPILE_FAILED, STATUS_BUILD_FAILED, STATUS_RUN_FAILED)
+                ]
+                mismatched = [qid for qid, row in report.items() if row["status"] == STATUS_MISMATCH]
+
+                meta: dict[str, Any] = {
+                    "model": cfg.model.name,
+                    "prompt_ids": list(task.prompt_ids),
+                    "level": level.name,
+                    "run_id": self.ctx.run_id,
+                }
+                if not broken and not mismatched:
+                    # Only a trustworthy artifact carries the fingerprint that marks it
+                    # current; otherwise the next run would skip the retry.
+                    meta["input_fingerprint"] = self.input_fingerprint(inputs)
+
+                sources_artifact = self.store.put_json(
+                    self.name,
+                    "query_sources",
+                    {"level": level.name, "namespace": level.namespace, "sources": sources},
+                    meta=meta,
+                    target=cfg.outputs.get("query_sources"),
+                )
+                report_artifact = self.store.put_json(
+                    self.name,
+                    "correctness_report",
+                    {
+                        "level": level.name,
+                        "verified": verified,
+                        "run_command": runner.template,
+                        "gold": {"mode": gold.mode, "summary": gold.summary()},
+                        "counts": counts,
+                        "queries": report,
+                    },
+                    meta=meta,
+                    target=cfg.outputs.get("correctness_report"),
+                )
+
+                all_level_results.append(
+                    {
+                        "level": level.name,
+                        "sources_artifact": sources_artifact,
+                        "report_artifact": report_artifact,
+                        "counts": counts,
+                        "verified": verified,
+                        "unverified": unverified,
+                        "broken": broken,
+                        "mismatched": mismatched,
+                        "num_queries": len(queries),
+                    }
+                )
+
+        # Aggregate results from all levels. For the common single-level case
+        # these collapse to exactly that level's own numbers, so the metrics
+        # shape stays backward compatible with a single-level run.
+        all_broken: list[str] = []
+        all_mismatched: list[str] = []
+        combined_counts: dict[str, int] = {}
+        for r in all_level_results:
+            all_broken.extend(r["broken"])
+            all_mismatched.extend(r["mismatched"])
+            for status, count in r["counts"].items():
+                combined_counts[status] = combined_counts.get(status, 0) + count
+
+        verified = all(r["verified"] for r in all_level_results)
+        unverified = sum(r["unverified"] for r in all_level_results)
+
+        metrics: dict[str, Any] = {
+            "queries": len(queries),
+            "verified": verified,
+            "unverified": unverified,
+            **{f"n[{status}]": count for status, count in sorted(combined_counts.items())},
         }
-        if not broken and not mismatched:
-            # Only a trustworthy artifact carries the fingerprint that marks it
-            # current; otherwise the next run would skip the retry.
-            meta["input_fingerprint"] = self.input_fingerprint(inputs)
+        if len(all_level_results) > 1:
+            metrics["levels"] = len(all_level_results)
+            metrics["levels_verified"] = sum(r["verified"] for r in all_level_results)
 
-        sources_artifact = self.store.put_json(
-            self.name,
-            "query_sources",
-            {"level": level.name, "namespace": level.namespace, "sources": sources},
-            meta=meta,
-            target=cfg.outputs.get("query_sources"),
-        )
-        report_artifact = self.store.put_json(
-            self.name,
-            "correctness_report",
-            {
-                "level": level.name,
-                "verified": verified,
-                "run_command": runner.template,
-                "gold": {"mode": gold.mode, "summary": gold.summary()},
-                "counts": counts,
-                "queries": report,
-            },
-            meta=meta,
-            target=cfg.outputs.get("correctness_report"),
-        )
-
-        metrics.update(
-            {
-                "queries": len(queries),
-                "verified": verified,
-                "unverified": unverified,
-                **{f"n[{status}]": count for status, count in sorted(counts.items())},
+        # Use the last level's artifacts as the primary ones
+        if all_level_results:
+            last = all_level_results[-1]
+            artifacts = {
+                "query_sources": last["sources_artifact"],
+                "correctness_report": last["report_artifact"],
             }
-        )
+        else:
+            artifacts = {}
 
-        artifacts = {
-            "query_sources": sources_artifact,
-            "correctness_report": report_artifact,
-        }
-        if broken or mismatched:
+        if all_broken or all_mismatched:
             problems = []
-            if broken:
-                problems.append(f"{len(broken)} did not build ({', '.join(broken[:5])})")
-            if mismatched:
+            if all_broken:
                 problems.append(
-                    f"{len(mismatched)} did not match gold ({', '.join(mismatched[:5])})"
+                    f"{len(all_broken)} did not build ({', '.join(set(all_broken[:5]))})"
+                )
+            if all_mismatched:
+                problems.append(
+                    f"{len(all_mismatched)} did not match gold ({', '.join(set(all_mismatched[:5]))})"
                 )
             return self.make_result(
                 artifacts=artifacts,
@@ -299,7 +356,7 @@ class QueryCodegenStage(Stage):
         spent independently, which a single-verifier loop cannot express.
         """
         cfg = self.cfg
-        rel_source = self._source_path(query)
+        rel_source = self._source_path(query, level)
         row: dict[str, Any] = {
             "query_id": query.id,
             "sql": query.text,
@@ -408,7 +465,7 @@ class QueryCodegenStage(Stage):
                 )
                 break
 
-            outcome = runner.run(query)
+            outcome = runner.run(query, level=level.name)
             if not outcome.ok:
                 if row["correctness_rounds"] >= max_correctness:
                     row["status"] = STATUS_RUN_FAILED
@@ -496,20 +553,27 @@ class QueryCodegenStage(Stage):
         value = self.cfg.params.get(name)
         return default if value is None else value
 
-    def _single_level(self) -> LevelConfig:
-        levels = self.cfg.resolved_active_levels()
-        if len(levels) == 1:
-            return levels[0]
-        names = ", ".join(level.name for level in levels) or "<none>"
-        raise ValueError(
-            f"query_codegen generates one level at a time, but {len(levels)} are active "
-            f"({names}). Set stages.query_codegen.active_levels to exactly one name; to "
-            f"compare levels, run the pipeline once per level with its own artifacts_dir "
-            f"and gen_project_root."
-        )
+    def _get_levels(self) -> list[LevelConfig]:
+        """Return all active levels, supporting generation of multiple levels sequentially.
 
-    def _source_path(self, query: Query) -> str:
+        Returns:
+            All active levels to be generated. The stage will iterate through each one.
+        """
+        levels = self.cfg.resolved_active_levels()
+        return levels
+
+    def _source_path(self, query: Query, level: LevelConfig) -> str:
+        """Where a query's generated source is written.
+
+        Nested under the level's name whenever more than one level is active,
+        so two levels generating the same query id do not overwrite each
+        other's source file (and so a later level's leftover file from an
+        earlier level can't make ``_setup_build_environment`` believe a full
+        dispatch build is already wired up for a level it never generated).
+        """
         directory = str(self._param("source_dir", "src/queries")).strip("/")
+        if len(self._get_levels()) > 1:
+            directory = f"{directory}/{level.name}" if directory else level.name
         return f"{directory}/{query.slug}.cpp" if directory else f"{query.slug}.cpp"
 
     def _include_line(self, header_path: Path, workspace: Any) -> str:
@@ -620,8 +684,13 @@ class QueryCodegenStage(Stage):
             return None
         return self.ctx.workspace_for(self.cfg)
 
-    def _setup_build_environment(self, workspace: Any, queries: list[Query]) -> bool:
+    def _setup_build_environment(self, workspace: Any, queries: list[Query], level: Optional[LevelConfig] = None) -> bool:
         """Generate CMakeLists.txt, query wrappers, and dispatch code if needed.
+
+        Args:
+            workspace: The workspace for code generation.
+            queries: The queries to build.
+            level: The active level (for potential future use in multi-level builds).
 
         Returns True if setup was successful, False otherwise.
         """

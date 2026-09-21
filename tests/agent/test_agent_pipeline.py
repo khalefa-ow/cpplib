@@ -443,16 +443,19 @@ class TestStoragePlanStage:
         assert len(patched_configure) == 1  # the model was never called again
 
     def test_editing_the_prompt_invalidates_the_cache(
-        self, loaded_config, manifest_path, prompts_dir, patched_configure
+        self, loaded_config, manifest_path, patched_configure
     ):
-        from agent.prompting.build_manifest import build_manifest
+        import json
+
+        from agent.prompting.build_manifest import rebuild_manifest
 
         Pipeline(loaded_config, manifest_path=manifest_path).run(only=["storage_plan"])
         assert len(patched_configure) == 1
 
-        policy = prompts_dir / "storage_plan_policy.txt"
-        policy.write_text(policy.read_text(encoding="utf-8") + "\nExtra rule.\n", encoding="utf-8")
-        build_manifest(prompts_dir, manifest_path, strict=True)
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        raw["entries"]["storage_plan_policy"]["text"] += "\nExtra rule.\n"
+        manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        rebuild_manifest(manifest_path, strict=True)
 
         summary = Pipeline(loaded_config, manifest_path=manifest_path).run(
             only=["storage_plan"], force=True

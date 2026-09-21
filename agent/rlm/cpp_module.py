@@ -112,6 +112,7 @@ class CppRLM(_module_base()):  # type: ignore[misc]
                     allow_writes=allow_writes,
                     allow_build=allow_build,
                     run_query=run_query,
+                    auto_build=self.config.auto_build_after_write,
                 )
             )
         tools.extend(extra_tools)

@@ -1,6 +1,11 @@
-"""Prompt files on disk, organized by a JSON manifest."""
+"""Prompts, stored inline in a JSON manifest."""
 
-from agent.prompting.build_manifest import build_manifest, classify
+from agent.prompting.build_manifest import (
+    classify,
+    import_prompts_dir,
+    rebuild_manifest,
+    set_prompt_text,
+)
 from agent.prompting.manifest import PromptEntry, PromptManifest, scan_placeholders, sha256_text
 from agent.prompting.registry import (
     DEFAULT_MANIFEST_PATH,
@@ -15,9 +20,11 @@ __all__ = [
     "PromptManifest",
     "PromptRegistry",
     "RenderedPrompt",
-    "build_manifest",
     "classify",
+    "import_prompts_dir",
     "load_registry",
+    "rebuild_manifest",
     "scan_placeholders",
+    "set_prompt_text",
     "sha256_text",
 ]

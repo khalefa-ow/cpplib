@@ -447,6 +447,78 @@ class TestTools:
         assert "src/engine.cpp" in out
 
 
+class TestAutoBuild:
+    """auto_build=True chains a build_project() call onto every successful edit."""
+
+    def _spy_build(self, monkeypatch, workspace, ok=True):
+        calls = []
+
+        def fake_build_project():
+            calls.append(1)
+            return CompileResult(ok=ok, command=["cmake", "--build", "."])
+
+        monkeypatch.setattr(workspace, "build_project", fake_build_project)
+        return calls
+
+    def test_disabled_by_default(self, workspace, monkeypatch):
+        calls = self._spy_build(monkeypatch, workspace)
+        tools = {t.__name__: t for t in make_cpp_tools(workspace)}
+        out = tools["write_file"]("src/new.cpp", "// nothing\n")
+        assert calls == []
+        assert "auto-build" not in out
+
+    def test_runs_after_a_successful_write(self, workspace, monkeypatch):
+        calls = self._spy_build(monkeypatch, workspace, ok=True)
+        tools = {t.__name__: t for t in make_cpp_tools(workspace, auto_build=True)}
+        out = tools["write_file"]("src/new.cpp", "// nothing\n")
+        assert calls == [1]
+        assert "[auto-build] OK" in out
+
+    def test_runs_after_replace_function_and_delete_file(self, workspace, monkeypatch):
+        calls = self._spy_build(monkeypatch, workspace, ok=True)
+        tools = {t.__name__: t for t in make_cpp_tools(workspace, auto_build=True)}
+        tools["replace_function"]("src/engine.cpp", "add", "int add(int a, int b) { return a + b; }")
+        tools["delete_file"]("src/engine.cpp")
+        assert calls == [1, 1]
+
+    def test_a_rejected_patch_does_not_trigger_a_build(self, workspace, monkeypatch):
+        calls = self._spy_build(monkeypatch, workspace, ok=True)
+        tools = {t.__name__: t for t in make_cpp_tools(workspace, auto_build=True)}
+        out = tools["apply_patch"]("not a real patch")
+        assert calls == []
+        assert "PATCH FAILED" in out
+
+    def test_a_failing_build_is_reported_not_raised(self, workspace, monkeypatch):
+        self._spy_build(monkeypatch, workspace, ok=False)
+        tools = {t.__name__: t for t in make_cpp_tools(workspace, auto_build=True)}
+        out = tools["write_file"]("src/new.cpp", "// nothing\n")
+        assert "[auto-build] FAILED" in out
+
+    def test_requires_both_writes_and_build_to_be_allowed(self, workspace, monkeypatch):
+        calls = self._spy_build(monkeypatch, workspace, ok=True)
+        tools = {
+            t.__name__: t
+            for t in make_cpp_tools(workspace, allow_build=False, auto_build=True)
+        }
+        tools["write_file"]("src/new.cpp", "// nothing\n")
+        assert calls == []
+
+    def test_auto_build_is_traced_as_its_own_step(self, workspace, monkeypatch):
+        self._spy_build(monkeypatch, workspace, ok=True)
+        writer = TraceWriter()
+        tools = {
+            t.__name__: t
+            for t in make_cpp_tools(workspace, writer=writer, auto_build=True)
+        }
+        with run_context(stage="demo"):
+            tools["write_file"]("src/new.cpp", "// nothing\n")
+        records = {r["name"]: r for r in writer.events(event="cpp_tool")}
+        assert set(records) == {"write_file", "auto_build"}
+        assert records["auto_build"]["error"] is None
+        # auto_build runs, and is traced, from inside write_file's own span.
+        assert records["auto_build"]["parent_span_id"] == records["write_file"]["span_id"]
+
+
 class TestWorkspaceConstruction:
     def test_falls_back_to_root_when_there_is_no_src(self, tmp_path):
         root = tmp_path / "flat"

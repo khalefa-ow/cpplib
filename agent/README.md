@@ -13,9 +13,9 @@ the package can be pointed at any project.
 ```bash
 uv pip install -e ".[dev,agent]"          # adds dspy, duckdb, pyarrow
 python -m agent.cli doctor                # check deno, cmake, g++, keys
-python -m agent.cli prompts build         # (re)generate the prompt manifest
 python -m agent.cli run --config agent/examples/config.example.json --dry-run
 python -m agent.cli run --config agent/examples/config.example.json
+python -m agent.cli run --config agent/examples/config.example.json --steps 5  # stage by stage
 ```
 
 All five stages are implemented. A run resumes: a stage whose outputs already
@@ -116,7 +116,7 @@ agent/
 ├── cli.py            run | doctor | prompts build/list/show | config show/normalize
 ├── pipeline.py       dependency ordering, resumption, failure handling
 ├── config/           pydantic models + loader (field-level inheritance, legacy mapping)
-├── prompting/        manifest over prompts/*.txt, strict rendering, fingerprints
+├── prompting/        manifest with inline prompt text, strict rendering, fingerprints
 ├── llm/              dspy.LM construction (OpenAI/DeepSeek), content-addressed cache
 ├── trace/            span stack, JSONL callbacks, optional weave/wandb
 ├── rlm/              CppWorkspace, compile results, tool callables, CppRLM
@@ -167,12 +167,13 @@ LiteLLM would otherwise send the request to `api.openai.com`.
 
 ## Prompts
 
-Prompt text stays in `prompts/*.txt` — readable and diffable — with
-`agent/prompting/manifest.json` carrying the metadata. Rebuild it after editing
-a prompt:
+Prompt text lives **inline** in `agent/prompting/manifest.json` — each entry's
+`text` field is the full template, alongside its metadata. There is no
+separate `prompts/*.txt` directory; the manifest is the only source of truth.
 
 ```bash
-python -m agent.cli prompts build
+python -m agent.cli prompts set query_codegen_task --file draft.txt   # add/edit one prompt
+python -m agent.cli prompts build                                      # resync derived fields
 python -m agent.cli prompts show optim_w_trace --var query_id=7 --var sf=0.25 ...
 ```
 
@@ -181,16 +182,19 @@ the two code stages; `fix_compile_errors` is the repair prompt both of them use,
 and it is in their `default_prompt_ids` so that editing it invalidates exactly
 their caches.
 
-The builder detects placeholders in both `${braced}` and bare `$named` form,
-preserves hand-edited `stage`/`role`/`description`/`composes`, and bumps
-`version` only when a file's content hash changes. It **fails** on a stray `$`
-that is not a valid placeholder rather than letting `substitute` raise mid-run.
+`prompts build` detects placeholders in both `${braced}` and bare `$named`
+form, preserves hand-edited `stage`/`role`/`description`/`composes`, and bumps
+`version` only when an entry's `text` changed since the last build. It
+**fails** on a stray `$` that is not a valid placeholder rather than letting
+`substitute` raise mid-run. `agent.prompting.import_prompts_dir()` (or
+`prompts build --prompts-dir <dir>`) remains for bulk-importing an external
+directory of `.txt` files as inline entries.
 
-Rendering is strict: a missing placeholder is an error naming the prompt, file
-and missing names, never a prompt that reaches the model still containing
-`${query_id}`. Fragments compose automatically — every `optim_w_*.txt` opens
-with `${constraints}`, which is filled from `optim_constraints` without being
-passed.
+Rendering is strict: a missing placeholder is an error naming the prompt and
+the missing names, never a prompt that reaches the model still containing
+`${query_id}`. Fragments compose automatically — every `optim_w_*` prompt
+opens with `${constraints}`, which is filled from `optim_constraints` without
+being passed.
 
 ## Caching
 
@@ -200,9 +204,10 @@ under `cache.dir`. DSPy's own LM cache sits underneath and covers what ours
 cannot see: the individual completions inside a single RLM call, including its
 recursive sub-calls.
 
-Editing a prompt file changes its fingerprint and so invalidates exactly the
-entries that depended on it. `cache.refresh` recomputes on every lookup while
-still writing, which refreshes a stale answer without discarding the cache.
+Editing a prompt's text (and rebuilding the manifest) changes its fingerprint
+and so invalidates exactly the cache entries that depended on it.
+`cache.refresh` recomputes on every lookup while still writing, which
+refreshes a stale answer without discarding the cache.
 
 ## Tracing
 

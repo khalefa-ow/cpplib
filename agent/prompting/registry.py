@@ -46,15 +46,11 @@ class RenderedPrompt(BaseModel):
 
 
 class PromptRegistry:
-    """Loads prompt text lazily and renders it strictly."""
+    """Holds a loaded manifest and renders its prompts strictly."""
 
     def __init__(self, manifest: PromptManifest, manifest_path: Optional[Path] = None):
         self.manifest = manifest
         self.manifest_path = manifest_path
-        self.prompts_root = Path(manifest.prompts_root)
-        if manifest_path is not None and not self.prompts_root.is_absolute():
-            self.prompts_root = (Path(manifest_path).parent / self.prompts_root).resolve()
-        self._text_cache: dict[str, str] = {}
 
     # --- construction -----------------------------------------------------
 
@@ -87,37 +83,14 @@ class PromptRegistry:
             raise MissingPromptError(prompt_id, self.manifest.entries.keys())
         return entry
 
-    def path_of(self, prompt_id: str) -> Path:
-        """Absolute path to a prompt's text file."""
-        entry = self.get(prompt_id)
-        file = Path(entry.file)
-        return file if file.is_absolute() else (self.prompts_root / file)
-
     def text_of(self, prompt_id: str) -> str:
-        """Raw template text, read once and memoized.
+        """Raw template text, straight from the entry.
 
-        Warns via :class:`PromptError` when the file on disk no longer matches
-        the manifest hash, since that means the manifest's recorded placeholders
-        and cache fingerprint are stale.
+        There is nothing to go stale against: ``text`` is the only copy, and
+        :meth:`PromptEntry.fingerprint` hashes it directly, so a hand edit is
+        reflected immediately without needing a rebuild first.
         """
-        if prompt_id in self._text_cache:
-            return self._text_cache[prompt_id]
-        entry = self.get(prompt_id)
-        path = self.path_of(prompt_id)
-        if not path.exists():
-            raise PromptError(
-                f"Prompt '{prompt_id}' points at {path}, which does not exist. "
-                f"Re-run `python -m agent.cli prompts build`."
-            )
-        text = path.read_text(encoding="utf-8")
-        if entry.sha256 and sha256_text(text) != entry.sha256:
-            raise PromptError(
-                f"Prompt '{prompt_id}' ({path}) has changed since the manifest was built. "
-                f"Re-run `python -m agent.cli prompts build` so placeholders and cache "
-                f"fingerprints are up to date."
-            )
-        self._text_cache[prompt_id] = text
-        return text
+        return self.get(prompt_id).text
 
     # --- fingerprinting ---------------------------------------------------
 
@@ -161,7 +134,7 @@ class PromptRegistry:
 
         placeholders, problems = scan_placeholders(text)
         if problems:
-            raise InvalidTemplateError(self.path_of(prompt_id), "; ".join(problems))
+            raise InvalidTemplateError(prompt_id, "; ".join(problems))
 
         supplied: dict[str, Any] = {**(variables or {}), **kwargs}
         values: dict[str, Any] = {}
@@ -177,7 +150,7 @@ class PromptRegistry:
 
         missing = [name for name in placeholders if name not in values]
         if missing:
-            raise MissingPlaceholderError(prompt_id, self.path_of(prompt_id), missing)
+            raise MissingPlaceholderError(prompt_id, missing)
 
         rendered = Template(text).substitute(values)
         # Deduplicate while keeping first-seen order, so the fingerprint is stable.
@@ -238,7 +211,7 @@ class PromptRegistry:
                 raise InvalidTemplateError("<inline>", "; ".join(problems))
             missing = [name for name in placeholders if name not in variables]
             if missing:
-                raise MissingPlaceholderError("<inline>", "<inline>", missing)
+                raise MissingPlaceholderError("<inline>", missing)
             text = Template(inline).substitute(variables) if placeholders else inline
             return RenderedPrompt(
                 text=text,

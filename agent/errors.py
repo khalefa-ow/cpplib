@@ -56,7 +56,7 @@ class MissingPromptError(PromptError):
         available = ", ".join(sorted(known)) or "<none>"
         super().__init__(
             f"Prompt '{prompt_id}' is not in the manifest. Available ids: {available}. "
-            f"Run `python -m agent.cli prompts build` if you added a new prompt file."
+            f"Run `python -m agent.cli prompts set {prompt_id} --file <path>` to add it."
         )
 
 
@@ -68,12 +68,12 @@ class MissingPlaceholderError(PromptError):
     plausible-looking garbage.
     """
 
-    def __init__(self, prompt_id: str, file: Any, missing: Iterable[str]):
+    def __init__(self, prompt_id: str, missing: Iterable[str]):
         self.prompt_id = prompt_id
         self.missing = sorted(missing)
         names = ", ".join(self.missing)
         super().__init__(
-            f"Prompt '{prompt_id}' ({file}) is missing values for placeholder(s): {names}. "
+            f"Prompt '{prompt_id}' is missing values for placeholder(s): {names}. "
             f"Provide them via the stage's prompt_vars or the render() call."
         )
 
@@ -81,9 +81,9 @@ class MissingPlaceholderError(PromptError):
 class InvalidTemplateError(PromptError):
     """A template contains a '$' that is not a valid placeholder."""
 
-    def __init__(self, file: Any, detail: str):
+    def __init__(self, prompt_id: Any, detail: str):
         super().__init__(
-            f"Prompt file {file} contains an invalid '$' sequence: {detail}. "
+            f"Prompt '{prompt_id}' contains an invalid '$' sequence: {detail}. "
             f"Escape a literal dollar sign as '$$'."
         )
 

@@ -261,7 +261,7 @@ class OptimizeStage(Stage):
                 report["stopped"] = f"no source recorded for {query.id}"
                 break
 
-            with new_span("round", str(index)):
+            with new_span("round", str(index), writer=self.writer):
                 round_report = self._run_round(
                     index=index,
                     query=query,

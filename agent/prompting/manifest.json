@@ -3,42 +3,38 @@
     "divide_policy": {
       "composes": {},
       "description": "",
-      "file": "divide_policy.txt",
       "id": "divide_policy",
       "placeholders": [
         "level_names"
       ],
       "role": "task",
-      "sha256": "3f0cf8fb3176674691eafdb8c9ca19a4d8bc5503143081db60640d3daa2a120f",
       "stage": "divide",
+      "text": "Policy: split inputs into hint levels.\n\nLevel 1 \u2014 no_hints:\n- Use only schema facts (tables, columns, types, keys, constraints, relationships).\n- Do NOT include storage-plan hints, notes, optimization or implementation advice.\n\nLevel 2 \u2014 organization_level:\n- Present organized schema facts using clear headings and groupings (Overview; Tables/Entities; Columns and Types; Keys and Constraints; Relationships).\n- Still do NOT include storage-plan hints or notes.\n\nLevel 3 \u2014 all_hints:\n- Include schema facts plus all hints and notes present in the storage plan.\n- Do NOT invent new hints, storage decisions, indexes, layouts, encodings, or implementation details.\n- If something is only implied by the storage plan, mark it as \"Implied by storage plan\".\n\nFor each level, also produce a short one-sentence data structure description for downstream code generation.\n\nReturn valid JSON only, in this shape, using exactly the level names declared below:\n{\"levels\": {\"<level_name>\": \"<level text>\"}, \"data_structure_descriptions\": {\"<level_name>\": \"<short data structure description>\"}}\n\nDeclared level names: ${level_names}\n",
       "version": 1
     },
     "expert_knowledge": {
       "composes": {},
       "description": "",
-      "file": "expert_knowledge.txt",
       "id": "expert_knowledge",
       "placeholders": [],
       "role": "knowledge",
-      "sha256": "a3f95f54cdc3210aa1ae486e7aeb399870a21211ff4703625e57d72e3b18a8e3",
       "stage": "optimize",
+      "text": "# Memory Access & Data Movement\n\n1. Ensure sequential memory access patterns\nTraverse memory linearly whenever possible. Seuquential access maximizes cache line utilization and hardware prefetch efficiency.\n\n2. Prefer pointer iteration over indexed access in tight loops - ensure sequential memory access patterns\nSequential pointer traversal reduces address recomputation and improves auto-vectorization.\n\n3. Prefetch data when accessing through indices\nIf you access arrays indirectly through an index list, the CPU cannot predict what memory will be needed next. Manually prefetching upcoming elements helps hide memory latency and reduces cache misses.\n\n4. Copy small records into local variables\nWhen repeatedly accessing multiple fields of a small struct, copy the struct into a local variable first. This allows the compiler to keep values in registers instead of reloading them from memory.\n\n5. Avoid unnecessary move or copy operations\nUse in-place construction and rely on compiler elision where possible.\n\n# Loop Structure & Invariants\n\n6. Hoist invariant work out of loops\nAny computation, lookup, or reference that does not change per iteration must be moved outside the loop.\n\n7. Eliminate repeated structural checks\nDo not repeatedly verify conditions that are constant or guaranteed.\nCompute once, cache once, or rely on established invariants.\nAlso, if different conditions require different processing strategies, determine the strategy before the loop starts and then run the appropriate version. Avoid checking the same conditions repeatedly while scanning data.\n\n8. Decide execution strategy before entering the loop\nIf multiple processing modes exist, select the mode once and run a dedicated loop variant.\n\n9. Avoid duplicating large loop bodies\nIf several branches run almost identical loops with only small differences in filtering, combine them into one loop and control behavior with flags. This keeps code smaller, improves instruction cache usage, and helps the compiler optimize better.\n\n# Control Flow\n\n10. Minimize branching in inner loops\nUse early-continue filtering or direct predicate-based accumulation.\nAvoid auxiliary state flags if results can be inferred.\n\n11. Consider branchless computation when branch prediction is poor\nIf control flow is unpredictable, replace branches with arithmetic masking.\nComputing a boolean condition and using it to control arithmetic (e.g., multiply by 0 or 1) can be faster than branching, especially in large scans.\n\n# Arithmetic & Computation Cost\n\n12. Remove expensive arithmetic from hot loops\nAvoid division or other high-latency operations per element.\nPrecompute constants or perform normalization after aggregation.\n\n13. Avoid expensive general-purpose parsing in hot paths\nDo not use high-level string conversions or substring allocation inside tight loops (e.g. std::stoi, std::stod, substr).\nPrefer fixed-format, allocation-free parsing directly from raw memory.\n\n# Containers & Lookup Struktures\n\n14. Pre-size output containers using realistic estimates\nEstimate result size from selectivity or statistics to avoid dynamic growth.\n\n15. Replace repeated linear searches with indexed lookup structures\nUse hash-based or constant-time lookup instead of scanning collections repeatedly.\n\n# Algorithm Selection\n\n16. Use algorithms specialized for data characteristics\nFor fixed-width numeric keys or sortable primitives, prefer non-comparison-based or domain-specific algorithms.\n\n# Compiler Optimization Signals\n\n17. Communicate aliasing guarantees\nTell the compiler when memory regions do not overlap (e.g. restrict semantics).\n\n18. Inline hot functions when beneficial\nReduces call overhead and exposes optimization opportunities.\n\n# Vectorizaton & Hardware Utilization\n\n19. Exploit SIMD parallelism where applicable\nProcess multiple elements per iteration using vectorized comparisons and masked arithmetic.",
       "version": 1
     },
     "expert_knowledge_abstract_old": {
       "composes": {},
       "description": "",
-      "file": "expert_knowledge_abstract_old.txt",
       "id": "expert_knowledge_abstract_old",
       "placeholders": [],
       "role": "knowledge",
-      "sha256": "74c7ee4de7dd67985f5a13d35b4a11008a98e5bb9fa6e691b37c452a227274f3",
       "stage": "optimize",
+      "text": "An expert has given the following tips to consider when optimizing a custom in-memory OLAP database engine in C++. The workload is read-only and the set of queries is fixed.\n\n\u2022 Prefer query-specific physical layouts over generic ones. Store only the columns used by the fixed queries, partition data along the primary filter dimension (often time), and cluster or sort data to match common predicates and group-by keys.\n\n\u2022 Exploit the read-only nature of the data. Pre-join dimension tables into fact tables when joins are always the same, precompute frequently used expressions, and materialize partial or full aggregations that match the fixed query set.\n\n\u2022 Use aggressive data skipping. Maintain per-partition or per-chunk min/max (zone maps) on filtered columns, dictionary-ID presence sets for equality predicates, and lightweight bitmaps where selectivity is high.\n\n\u2022 Dictionary-encode all strings and low-cardinality columns. Execute predicates, joins, and group-bys on integer IDs instead of strings. Choose encodings per column and per partition to maximize compression and minimize memory bandwidth.\n\n\u2022 Sort or cluster data intentionally to improve both compression and execution speed. Sorting by filter and group-by keys enables RLE, delta encoding, better cache locality, and faster aggregations.\n\n\u2022 Eliminate general-purpose execution overhead. Build query-specific execution pipelines with no virtual dispatch, no iterator-style operators, and minimal branching. Hardcode predicate constants, join keys, and aggregation logic where possible.\n\n\u2022 Use vectorized execution throughout. Process data in fixed-size batches, combine predicates into single kernels, and carry selection vectors or bitsets instead of materializing intermediate results.\n\n\u2022 Leverage SIMD aggressively. Use SIMD comparisons for filters, SIMD hashing or probing where applicable, and branchless aggregation kernels to reduce misprediction and instruction overhead.\n\n\u2022 Optimize joins for fixed schemas. Prefer perfect hashing or array-based joins when keys are dense. Otherwise, build dimension hash tables once and reuse them across queries. Radix-partition joins when hash tables exceed cache.\n\n\u2022 Optimize aggregations for predictability. Use per-thread local aggregation with a merge phase. For dense or low-cardinality group keys, use direct indexing instead of hash tables.\n\n\u2022 Pre-size and specialize hash tables. Avoid rehashing, store hash values alongside keys, and use open-addressing or cache-friendly probing schemes.\n\n\u2022 Be NUMA-aware. Partition data by NUMA node, run scans locally, and replicate small read-only structures per node to avoid cross-socket traffic.\n\n\u2022 Avoid dynamic memory allocation in hot paths. Use arena or region allocators with query-lifetime memory and eliminate malloc/free during execution.\n\n\u2022 Avoid features that only benefit ad-hoc or mutable workloads. Skip cost-based optimizers, generic indexes, tuple-at-a-time execution, complex concurrency control, and transactional abstractions unless strictly required.\n\n\u2022 Implement optimizations in a high-impact order: \n  1) columnar layout with partitioning and dictionary encoding\n  2) data skipping and projection pruning\n  3) clustering/sorting to match query patterns\n  4) precomputation (joins, expressions, aggregations)\n  5) vectorized and SIMD execution\n  6) NUMA-aware parallelism and memory placement\n  7) query-specific compiled execution pipelines\n",
       "version": 1
     },
     "fix_compile_errors": {
       "composes": {},
       "description": "",
-      "file": "fix_compile_errors.txt",
       "id": "fix_compile_errors",
       "placeholders": [
         "compiler",
@@ -47,36 +43,33 @@
         "diagnostics"
       ],
       "role": "task",
-      "sha256": "f77abe5d238a751e17faf5b8636d98bbb3f4fa29fea1d6e5e4145b77e04d967d",
       "stage": "query_codegen",
+      "text": "The code you generated has an issue. Fix it.\n\nCompiler: ${compiler} with ${cpp_standard}\nCommand that failed:\n${command}\n\nDiagnostics or Verification Issue:\n${diagnostics}\n\nRules for the fix:\n- Fix the cause, not the symptom. Do not silence a diagnostic by deleting the code that triggers it, by casting the type away, or by widening a signature until it compiles.\n- Do not change the input/output interface of the generated entry points.\n- Do not weaken the storage layout to make a query compile. If a query genuinely cannot be expressed against the current layout, say so explicitly instead of quietly changing the layout.\n- Keep the project buildable: if a fix requires a new include or a new declaration, add it.\n- Change as little as possible. A large rewrite hides which edit actually fixed the error.\n\nYou have tools to read the current code by symbol and to recompile. Read the specific function or class named in each diagnostic before editing it \u2014 do not guess at the surrounding code. After editing, recompile and confirm the diagnostics are gone.\n\nIf a diagnostic is a warning rather than an error and the code is correct as written, leave it and say why.\n\nCOMMON ISSUES WITH OUTPUT FORMAT:\n- If the comparison shows \"row count differs\", check your output delimiter. It MUST be a single comma ','.\n  Never use pipes '|', spaces, or other characters.\n- If parsing shows wrong column count, the delimiter in your code may be wrong.\n- Strip trailing whitespace and control characters (including \\r, \\n) from string columns before output.\n",
       "version": 3
     },
     "hppgen_policy": {
       "composes": {},
       "description": "",
-      "file": "hppgen_policy.txt",
       "id": "hppgen_policy",
       "placeholders": [],
       "role": "task",
-      "sha256": "95cd80e8d78f871470ad8f1859c7d5af56da4e1669e0654b4c809426e4070fd6",
       "stage": "hppgen",
+      "text": "Generate the storage-layout header for an in-memory, read-only analytical C++ query engine.\n\nYou are given one hint level: the schema facts, and \u2014 depending on the level \u2014 the storage-plan hints that accompany them. Implement exactly what the level text supports and nothing more.\n\nThe header must contain:\n\n1. The column and table structures\n   - One struct per table, holding its columns as contiguous containers.\n   - Variable-length values as an offset array plus a character data array, not as a container of std::string per row, unless the level text says otherwise.\n   - Nullability only for columns the schema marks nullable.\n   - Fixed-width encodings where the level text calls for them (dictionary ids for low-cardinality strings, integral days for dates, narrowed integers).\n\n2. The database structure\n   - One struct aggregating every table, plus whatever lookup structures the level text describes.\n   - A declared entry point for ingestion; its definition belongs in the loader, not here.\n\n3. Access-path members the level text justifies, and no others.\n\nHard rules:\n- Everything goes in one self-contained header, wrapped in `#pragma once` and the namespace you are given.\n- Header-only: declarations, type definitions and inline functions. No I/O, no Parquet reading, no query logic.\n- Include only what you use, from the standard library.\n- Compile cleanly under the project's C++ standard. Prefer std::vector and fixed-width integer types from <cstdint>.\n- Do not invent tables, columns, indexes or encodings the level text does not support. If the level text omits something you would need, leave it out rather than guessing.\n- Name types and members after the schema's own names so later stages can find them.\n\nOutput only the header source. No prose, no markdown fences.\n",
       "version": 1
     },
     "optim_add_timings_collect_stats": {
       "composes": {},
       "description": "",
-      "file": "optim_add_timings_collect_stats.txt",
       "id": "optim_add_timings_collect_stats",
       "placeholders": [],
       "role": "task",
-      "sha256": "442b32873db43f8ca7c39d6d808fb50447dc360d693e157cf2761dc667b5615f",
       "stage": "optimize",
+      "text": "# Objective\nAdd comprehensive tracing instrumentation to measure query execution timing and row flow. The goal is to produce actionable data that identifies bottlenecks and validates optimizations.\n\n# Requirements\n## 1. Compilation & Overhead\n- All profiling code must be behind #ifdef TRACE\n- Zero overhead when compiled without the flag\n- No allocations or I/O in hot paths\u2014print results once at query end\n- Use high-resolution timers (nanosecond precision)\n\n## 2. Output Format\nStable, machine-parsable output with two line types:\n```\nPROFILE <section_name> <nanoseconds>\nCOUNT <counter_name> <value>\n```\nNames should reflect the specific query, and phase. E.g. `q1_titlescan_decode`, ...\n\n## 3. Row Count Instrumentation\nTrack data flow through each operator:\n\nScan counters:\n- rows_scanned - Total rows read\n- rows_emitted - Rows passing filter (rows_scanned - rows_filtered_out)\n\nJoin counters:\n- build_rows_in - Build side input rows\n- probe_rows_in - Probe side input rows\n- join_rows_emitted - Output rows\n\nAggregation counters:\n- agg_rows_in - Input rows\n- groups_created - Distinct groups\n- agg_rows_emitted - Output rows (usually equals groups_created)\n\nSort counters:\n- sort_rows_in\n- sort_rows_out\n\nGeneral:\n- query_output_rows - Final result count\n\n## 4. Implementation Pattern\nUse RAII-style scoped timers:\n```\n#ifdef TRACE\n#define PROFILE_SCOPE(name) ScopedTimer _timer(name)\nclass ScopedTimer {\n    const char* name;\n    uint64_t start_ns;\npublic:\n    ScopedTimer(const char* n) : name(n), start_ns(get_time_ns()) {}\n    ~ScopedTimer() { record_timing(name, get_time_ns() - start_ns); }\n};\n#else\n#define PROFILE_SCOPE(name)\n#endif\n```\nUsage:\n```\nvoid execute_scan() {\n    PROFILE_SCOPE(\"scan_total\");\n    {\n        PROFILE_SCOPE(\"scan_decode\");\n        decode_data();\n    }\n    rows_scanned += n;\n}\n```\n\n# YOUR TASK\nInstrument the execution code of all queries to collect the tracing statistics. Use macros to add timing and counting instrumentation to all major operatorion (scan, join, aggregation, sort, etc.) and wherever you seem helpful according to the requirements above. Ensure that the output is stable and parsable, and that there is no overhead when TRACE is disabled.\n",
       "version": 1
     },
     "optim_add_timings_collect_stats_per_query": {
       "composes": {},
       "description": "",
-      "file": "optim_add_timings_collect_stats_per_query.txt",
       "id": "optim_add_timings_collect_stats_per_query",
       "placeholders": [
         "qids_str",
@@ -84,25 +77,23 @@
         "refer_to_prev"
       ],
       "role": "task",
-      "sha256": "d11ea87883b0ae66074ea4e87f42c8f4a435c86ea6ec718cf2beb6da87645f75",
       "stage": "optimize",
+      "text": "Add timing instrumentation to the execution code of the following queries: ${qids_str}. Verify your tracing implementation by using the RUN tool with tracing enabled (with scale factor ${sf}). Check that the output contains all required timing and counting information for these queries, and that the numbers make sense given the data size and query logic. If output is empty/null/0 where it shouldn't be, investigate and fix the instrumentation.${refer_to_prev}",
       "version": 1
     },
     "optim_constraints": {
       "composes": {},
       "description": "",
-      "file": "optim_constraints.txt",
       "id": "optim_constraints",
       "placeholders": [],
       "role": "fragment",
-      "sha256": "a5b4315164216f2c579e57517d117dad56c388afeb81cf2478e243dc446b1725",
       "stage": "optimize",
+      "text": "Hard constraints (must obey):\n- Leave the input/output interface unchanged.\n- Single-threaded C++ only.\n- Do not cheat by shifting work from execution to ingestion: No indexes, no materialized views, no pre-aggregation, no statistics collection used by execution, no query-result caching, no query-specific lookup tables or query-specific precomputed maps/arrays.\n- Maintain ONE storage layout for all queries (no multiple copies of the same logical data).\n- Storage layout must remain general enough that in theory arbitrary SQL could be executed.\n- Always load all data from Parquet during ingestion (do not skip rows or columns).",
       "version": 1
     },
     "optim_pinning": {
       "composes": {},
       "description": "",
-      "file": "optim_pinning.txt",
       "id": "optim_pinning",
       "placeholders": [
         "query_impl_path",
@@ -110,14 +101,13 @@
         "core_id"
       ],
       "role": "task",
-      "sha256": "7887cc2865a73a14e8bc2f3e26b0bb7da7009a87d556bb6720e5e307e6d314cf",
       "stage": "optimize",
+      "text": "Your Task is to adapt the query implementation code (`${query_impl_path}`) and pin the query-execution to a single logical CPU core. Do this to ensure deterministic performance measurements and reduce noise from scheduling variability. Use the same core for all implemented queries. \n${affinity_prompt}\nPin to core ${core_id}.",
       "version": 1
     },
     "optim_pretext_general": {
       "composes": {},
       "description": "",
-      "file": "optim_pretext_general.txt",
       "id": "optim_pretext_general",
       "placeholders": [
         "queries_path",
@@ -125,21 +115,20 @@
         "query_str"
       ],
       "role": "fragment",
-      "sha256": "2b8c15efe22d200594931a7bd72256453176c7b889e424eeb8f21dfcec23c9d8",
       "stage": "optimize",
+      "text": "You are an expert database engineer and skilled programmer.\nOptimize a specialized high-performance database engine in C++ that is tailored to only execute a predefined set of queries. The queries to be supported are listed in `$queries_path` ($num_queries $query_str).\n\nA basic implementation of the database engine is already done in your working directory. ",
       "version": 1
     },
     "optim_pretext_optim": {
       "composes": {},
       "description": "",
-      "file": "optim_pretext_optim.txt",
       "id": "optim_pretext_optim",
       "placeholders": [
         "storage_layout"
       ],
       "role": "fragment",
-      "sha256": "86a2f7148dc454823e4a4ea5bb0050c8703ca1ae070389c3a9b8d09596196142",
       "stage": "optimize",
+      "text": "Your task is to optimize the existing codebase to achieve the best possible performance for the given queries.\n\nDuring build, the database engine reads data from Arrow-Tables into a main-memory storage layout (in-memory database system).\n\nYou can modify any part of the existing codebase to improve performance, including data structures, ${storage_layout}algorithms, compression, and execution strategies. Focus on optimizing query execution times while maintaining correctness of the results. You can also change the ingestion pipeline if needed.\n",
       "version": 1
     },
     "optim_w_expert_knowledge": {
@@ -148,7 +137,6 @@
         "expert_knowledge": "expert_knowledge"
       },
       "description": "",
-      "file": "optim_w_expert_knowledge.txt",
       "id": "optim_w_expert_knowledge",
       "placeholders": [
         "constraints",
@@ -160,8 +148,8 @@
         "bespoke_storage_related"
       ],
       "role": "task",
-      "sha256": "657961e38b815aadba0cee074160e98b85b2712d5cc1dc9f9a03d8cbcdd91804",
       "stage": "optimize",
+      "text": "${constraints}\n\nOptimize query ${query_id} using expert knowledge on high-performance in-memory OLAP systems.\n\nAn expert has given the following tips to consider when optimizing a custom in-memory OLAP database engine in C++. The workload is read-only and the set of queries is fixed:\n\n${expert_knowledge}\n\nApply this tipps to bring down query runtime to ${target_rt} for sf ${sf} (current rt: ${current_rt}).\n\nAfter making your changes, validate correctness and benchmark on scalefactor ${sf}. Make sure the performance improved. Otherwise, try again or remove your changes.\n\nBe carefull with changes that affect other queries${bespoke_storage_related}. Avoid regressions on the other queries.\n\nTurn off trace instrumentation in the run-tool for reliable benchmarking. Call run-tool with trace to gather updated statistics for bottleneck identification (will be written to `tracing_output.log`).",
       "version": 1
     },
     "optim_w_human_reference": {
@@ -169,7 +157,6 @@
         "constraints": "optim_constraints"
       },
       "description": "",
-      "file": "optim_w_human_reference.txt",
       "id": "optim_w_human_reference",
       "placeholders": [
         "constraints",
@@ -180,8 +167,8 @@
         "bespoke_storage_related"
       ],
       "role": "task",
-      "sha256": "2f3b748e38f4834e0548ff8a39ed9a7e323703ebb1bae58671f39768e02adfa0",
       "stage": "optimize",
+      "text": "${constraints}\n\nOptimize query ${query_id} based on the collected tracing statistics in `tracing_output.log`.\n\nReduce the query runtime to less than ${target_rt} for sf ${sf} (current runtime: ${current_rt}). Approach this as Prof. Thomas Neumann or Matthias Jasny would: apply every low-level technique available, leave nothing on the table. Focus on the bottlenecks identified in the tracing output, but also reconsider the overall approach if the remaining gap is large.\n\nBe carefull with changes that affect other queries${bespoke_storage_related}. Avoid regressions on the other queries.\n\nAfter making your changes, validate that the query produces correct results and improved performance compared to the previous version. Benchmark on scalefactor ${sf}.\nMake sure the performance improved. Otherwise, try again or remove your changes.",
       "version": 1
     },
     "optim_w_trace": {
@@ -189,7 +176,6 @@
         "constraints": "optim_constraints"
       },
       "description": "",
-      "file": "optim_w_trace.txt",
       "id": "optim_w_trace",
       "placeholders": [
         "constraints",
@@ -201,8 +187,8 @@
         "bespoke_storage_related"
       ],
       "role": "task",
-      "sha256": "292aff9f7f134fd734b797309a7b115df8f3db9ca5750662c0b89dd7f3aa3bdb",
       "stage": "optimize",
+      "text": "${constraints}\n\nOptimize the implementation of query ${query_id} based on the collected tracing statistics in `tracing_output.log`.\n\nFocus on the code sections that are the bottlenecks according to the tracing output. After making your changes, validate that the query produces correct results and improved performance compared to the previous version. If performance did not improve, re-read the tracing statistics to re-identify bottlenecks and try again.\n\nTarget: reduce runtime to less than ${target_rt} for sf ${sf} (${factor}x improvement, current: ${current_rt}). Aim for even larger reductions where possible.\n\nBe carefull with changes that affect other queries${bespoke_storage_related}. Avoid regressions on the other queries.\n\nTurn off trace instrumentation in the run-tool for reliable benchmarking. Call run-tool with trace to gather updated statistics for bottleneck identification.\nMake sure the performance improved. Otherwise, try again or remove your changes.",
       "version": 1
     },
     "optim_with_sample_plan": {
@@ -210,7 +196,6 @@
         "constraints": "optim_constraints"
       },
       "description": "",
-      "file": "optim_with_sample_plan.txt",
       "id": "optim_with_sample_plan",
       "placeholders": [
         "constraints",
@@ -219,14 +204,13 @@
         "duckdb_plan"
       ],
       "role": "task",
-      "sha256": "4313f76f2e2e27ca5f065ae8958b8cc329f1948e990dcfd8626f5c83bbbee311",
       "stage": "optimize",
+      "text": "${constraints}\n\nOptimize the implementation of ${query_id} using this sample execution plan collected from DuckDB (sf ${sf}):\n${duckdb_plan}\n\nStudy the plan to understand join order, cardinalities, operator choices, and data access patterns that the DuckDB optimizer arrived at. Use this structural insight to align the current implementation with the plan's informations (e.g. build/probe sides, filter selectivity, aggregation grouping).\n\nAfter making your changes, validate that the query produces correct results and measure performance compared to the previous version.\nMake sure the performance improved. Otherwise, try again or remove your changes.",
       "version": 1
     },
     "query_codegen_task": {
       "composes": {},
       "description": "",
-      "file": "query_codegen_task.txt",
       "id": "query_codegen_task",
       "placeholders": [
         "entry_signature",
@@ -234,21 +218,19 @@
         "header_rule"
       ],
       "role": "task",
-      "sha256": "9bad9d99a2ed5ef791950bf2296996c0676850fbc60c1c4e8b7b42de7adbf1c9",
       "stage": "query_codegen",
+      "text": "Implement one SQL query as C++ against the generated storage layout.\n\nYou are given the query, the storage-layout header it must use, and the hint level's description of that layout. Produce a single self-contained translation unit that executes the query over data already loaded in memory.\n\nRequirements:\n\n1. Interface\n   - Include the storage-layout header and use its types; do not redefine them.\n   - Expose exactly one entry point: `${entry_signature}`.\n   - Write results to the provided output stream, one row per line.\n   - CRITICAL: Columns MUST be separated by a SINGLE CHARACTER: '${delimiter}' (comma).\n   - Do NOT use pipes, spaces, or any other separator. Output format: column1,column2,column3\n   - For string columns: trim all trailing whitespace, control characters, newlines and carriage returns before output.\n   - Print numeric values so they compare equal to the reference output: integers without a decimal point, and DECIMAL columns with their declared scale.\n   - ${header_rule}\n\n2. Execution\n   - Single-threaded. No SQL parsing at runtime: compile the query's plan into the code.\n   - Choose join order and build sides from the cardinalities you were given, smaller side as the hash build side.\n   - Respect the query's ORDER BY exactly; if it has none, emit rows in whatever order the plan produces.\n   - Apply filters as early as possible and touch only the columns the query needs.\n\n3. Constraints\n   - Do not modify the storage layout, and do not add per-query indexes, materialized results or precomputed lookup tables. The layout is shared by every query.\n   - Only the standard library. No external dependencies.\n   - No undefined behaviour: check bounds where the plan does not already guarantee them, and initialize every accumulator.\n\nOutput only the C++ source for this one query. No prose, no markdown fences.\n",
       "version": 3
     },
     "storage_plan_policy": {
       "composes": {},
       "description": "",
-      "file": "storage_plan_policy.txt",
       "id": "storage_plan_policy",
       "placeholders": [],
       "role": "task",
-      "sha256": "f289e0b3c509e0524098345411ed1b1697b3305df216e12e40558834cffb7fa5",
       "stage": "storage_plan",
+      "text": "You are an expert database engineer designing the in-memory storage layout for a read-only analytical query engine.\n\nYou are given a schema, a fixed set of queries, and optionally dataset statistics. Produce a storage plan: the concrete in-memory layout the engine should build after ingestion, justified by the query workload.\n\nCover each of the following:\n\n1. Physical layout per table\n   - Column-major, row-major, or hybrid, and why the workload favours it.\n   - The concrete C++ representation for each column (contiguous arrays, offset+data pairs for variable-length values, bitmaps for nullability).\n   - Fixed-width encodings where the schema permits them (dictionary encoding for low-cardinality strings, integer narrowing, date/time as integral days or micros).\n\n2. Access paths\n   - Which columns need sorted order, a hash index, or a zone map, and which queries justify each one.\n   - Join keys that should be pre-resolved to dense integer ids at build time.\n   - Group-by keys that should be dictionary-encoded so aggregation can use dense array slots instead of hashing strings.\n\n3. Data movement\n   - What is materialized once at build time versus recomputed per query.\n   - Where sequential access is preserved, and which columns are co-located because they are read together.\n\n4. Memory budget\n   - An estimate of bytes per table given the statistics, if statistics were provided.\n   - Any layout choice that trades memory for query time, stated explicitly as a trade.\n\nHard constraints:\n- Every layout decision must be traceable to the schema or to a specific query. Do not invent columns, tables, indexes or workload characteristics that the inputs do not support.\n- All data is loaded from Parquet during ingestion. Ingestion cost is acceptable; per-query cost is what matters.\n- Assume single-threaded query execution unless the queries clearly require otherwise.\n- If the statistics are absent, say which decisions are provisional on cardinality and what you assumed.\n\nWrite the plan as structured prose with headings, not as code. Downstream stages generate the C++ from it, so the plan must be precise enough to implement without further guessing, and must not contain the implementation itself.\n",
       "version": 1
     }
-  },
-  "prompts_root": "../../prompts"
+  }
 }

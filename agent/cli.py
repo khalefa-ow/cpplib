@@ -8,6 +8,7 @@ Commands:
     prompts show    Print a prompt, optionally rendered with variables.
     prompts list    List the manifest's entries.
     config show     Print a config's resolved, merged per-stage settings.
+    trace serve     Serve a step-by-step web view of a trace file's LLM calls.
 """
 
 from __future__ import annotations
@@ -20,10 +21,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from agent import __version__
 from agent.errors import AgentError
+
+if TYPE_CHECKING:
+    from agent.pipeline import Pipeline
 
 # Load environment variables from .env file if it exists
 try:
@@ -157,24 +161,68 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(pipeline.describe(only=only, start_from=args.start_from))
             return 0
 
+        if args.steps is not None:
+            return _run_step_by_step(pipeline, args, only)
+
         summary = pipeline.run(
             only=only,
             start_from=args.start_from,
             force=args.force,
             stop_on_error=not args.keep_going,
         )
+        print(summary.report())
+        if args.result_json:
+            Path(args.result_json).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.result_json).write_text(
+                summary.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"  result written to {args.result_json}")
+        return 0 if summary.ok else 1
     except AgentError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    print(summary.report())
-    if args.result_json:
-        Path(args.result_json).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.result_json).write_text(
-            summary.model_dump_json(indent=2) + "\n", encoding="utf-8"
+
+def _run_step_by_step(pipeline: "Pipeline", args: argparse.Namespace, only: Optional[list[str]]) -> int:
+    """Run the pipeline one stage at a time, advancing automatically.
+
+    Each step is a single pipeline stage (``storage_plan``, ``divide``,
+    ``hppgen``, ``query_codegen``, ``optimize`` by default), so ``--steps 5``
+    runs the full default pipeline stage by stage. A stage that itself covers
+    several hint levels (``hppgen``, ``query_codegen``) still generates every
+    level configured in ``active_levels`` within that one step; ``--steps``
+    counts stages, not levels.
+
+    Progress prints after every step, so a long run can be watched without
+    waiting for the whole pipeline to finish, and a run that dies partway
+    through can be resumed with ``--start-from`` at the failed stage.
+    """
+    names = pipeline.plan(only=only, start_from=args.start_from)
+    if not names:
+        print("no stages to run")
+        return 0
+    limit = min(args.steps, len(names)) if args.steps > 0 else len(names)
+
+    run_id: Optional[str] = None
+    all_ok = True
+    for index, name in enumerate(names[:limit], start=1):
+        print(f"\n[step {index}/{limit}] {name}")
+        summary = pipeline.run(
+            only=[name],
+            force=args.force,
+            run_id=run_id,
+            stop_on_error=True,
         )
-        print(f"  result written to {args.result_json}")
-    return 0 if summary.ok else 1
+        run_id = summary.run_id
+        print(summary.report())
+        if not summary.ok:
+            all_ok = False
+            if not args.keep_going:
+                print(f"\nstopped after {index}/{limit} step(s): {name} failed")
+                return 1
+
+    print(f"\ncompleted {limit}/{len(names)} step(s)" + ("" if all_ok else " (some failed)"))
+    return 0 if all_ok else 1
 
 
 # --------------------------------------------------------------------------
@@ -183,12 +231,18 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_prompts(args: argparse.Namespace) -> int:
-    from agent.prompting.build_manifest import build_manifest
+    from agent.prompting.build_manifest import import_prompts_dir, rebuild_manifest, set_prompt_text
     from agent.prompting.registry import PromptRegistry
 
     try:
         if args.prompts_command == "build":
-            manifest = build_manifest(args.prompts_dir, args.manifest, strict=not args.lax)
+            # With --prompts-dir: import/merge those .txt files as inline
+            # entries. Without it: recompute placeholders/version for every
+            # entry already in the manifest from its own text field.
+            if args.prompts_dir:
+                manifest = import_prompts_dir(args.prompts_dir, args.manifest, strict=not args.lax)
+            else:
+                manifest = rebuild_manifest(args.manifest, strict=not args.lax)
             print(f"wrote {args.manifest} with {len(manifest.entries)} entries")
             for entry in manifest.sorted_entries():
                 placeholders = ", ".join(entry.placeholders) or "-"
@@ -198,12 +252,37 @@ def cmd_prompts(args: argparse.Namespace) -> int:
                 )
             return 0
 
+        if args.prompts_command == "set":
+            if args.file:
+                text = Path(args.file).read_text(encoding="utf-8")
+            elif args.text is not None:
+                text = args.text
+            else:
+                text = sys.stdin.read()
+            manifest = set_prompt_text(
+                args.manifest,
+                args.prompt_id,
+                text,
+                stage=args.stage,
+                role=args.role,
+                description=args.description,
+                strict=not args.lax,
+            )
+            entry = manifest.entries[args.prompt_id]
+            placeholders = ", ".join(entry.placeholders) or "-"
+            print(
+                f"wrote '{args.prompt_id}' to {args.manifest} "
+                f"[{entry.stage or '-'}/{entry.role}] v{entry.version} {placeholders}"
+            )
+            return 0
+
         registry = PromptRegistry.from_manifest(args.manifest)
 
         if args.prompts_command == "list":
             for prompt_id in registry.ids():
                 entry = registry.get(prompt_id)
-                print(f"{prompt_id:42s} [{entry.stage or '-'}/{entry.role}] {entry.file}")
+                preview = entry.text.strip().splitlines()[0][:60] if entry.text.strip() else ""
+                print(f"{prompt_id:42s} [{entry.stage or '-'}/{entry.role}] {preview}")
             return 0
 
         if args.prompts_command == "show":
@@ -267,6 +346,24 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# trace
+# --------------------------------------------------------------------------
+
+
+def cmd_trace(args: argparse.Namespace) -> int:
+    from agent.trace.webview import serve
+
+    if args.trace_command == "serve":
+        trace_path = Path(args.trace_path)
+        if not trace_path.exists():
+            print(f"error: no trace file at {trace_path}", file=sys.stderr)
+            return 1
+        serve(trace_path, port=args.port, open_browser=not args.no_browser)
+        return 0
+    return 0
+
+
+# --------------------------------------------------------------------------
 # argument parsing
 # --------------------------------------------------------------------------
 
@@ -276,7 +373,6 @@ def _self() -> str:
 
 
 DEFAULT_MANIFEST = str(Path(__file__).parent / "prompting" / "manifest.json")
-DEFAULT_PROMPTS_DIR = str(Path(__file__).parent.parent / "prompts")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -304,20 +400,53 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the API key check (for offline/cached runs)",
     )
+    run.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help=(
+            "run N pipeline stages one at a time, advancing automatically "
+            "(e.g. --steps 5 runs storage_plan, divide, hppgen, query_codegen, "
+            "optimize in sequence). A stage covering several hint levels "
+            "(hppgen, query_codegen) still generates every active level "
+            "within its one step."
+        ),
+    )
     run.set_defaults(func=cmd_run)
 
     prompts = sub.add_parser("prompts", help="inspect and rebuild the prompt manifest")
     prompts_sub = prompts.add_subparsers(dest="prompts_command", required=True)
 
     prompts_build = prompts_sub.add_parser(
-        "build", help="regenerate the manifest from prompt files"
+        "build",
+        help="recompute placeholders/version from each entry's text "
+        "(or import a directory of .txt files with --prompts-dir)",
     )
-    prompts_build.add_argument("--prompts-dir", default=DEFAULT_PROMPTS_DIR)
+    prompts_build.add_argument(
+        "--prompts-dir",
+        default=None,
+        help="import/merge .txt files from this directory as inline entries, "
+        "instead of just recomputing from the manifest's existing text",
+    )
     prompts_build.add_argument("--manifest", default=DEFAULT_MANIFEST)
     prompts_build.add_argument(
         "--lax",
         action="store_true",
         help="do not fail on templates containing an invalid '$' sequence",
+    )
+
+    prompts_set = prompts_sub.add_parser("set", help="add or update one prompt's text")
+    prompts_set.add_argument("prompt_id")
+    prompts_set.add_argument("--manifest", default=DEFAULT_MANIFEST)
+    prompts_set.add_argument("--file", help="read the prompt text from this file")
+    prompts_set.add_argument("--text", help="the prompt text, given directly")
+    prompts_set.add_argument("--stage", help="override the entry's stage")
+    prompts_set.add_argument("--role", help="override the entry's role")
+    prompts_set.add_argument("--description", help="override the entry's description")
+    prompts_set.add_argument(
+        "--lax",
+        action="store_true",
+        help="do not fail on text containing an invalid '$' sequence",
     )
 
     prompts_list = prompts_sub.add_parser("list", help="list manifest entries")
@@ -344,6 +473,20 @@ def build_parser() -> argparse.ArgumentParser:
     config_normalize.add_argument("--config", required=True)
 
     config.set_defaults(func=cmd_config)
+
+    trace = sub.add_parser("trace", help="inspect a run's JSONL trace")
+    trace_sub = trace.add_subparsers(dest="trace_command", required=True)
+
+    trace_serve = trace_sub.add_parser(
+        "serve", help="serve a step-by-step web view of LLM calls in a trace file"
+    )
+    trace_serve.add_argument("trace_path", help="path to a trace.jsonl file")
+    trace_serve.add_argument("--port", type=int, default=8765)
+    trace_serve.add_argument(
+        "--no-browser", action="store_true", help="don't open a browser tab automatically"
+    )
+
+    trace.set_defaults(func=cmd_trace)
 
     return parser
 

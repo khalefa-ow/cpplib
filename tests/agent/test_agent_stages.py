@@ -688,18 +688,66 @@ class TestQueryCodegenStage:
         assert row["cache_hit"] is True
         assert len(calls) == after
 
-    def test_more_than_one_active_level_is_rejected_with_instructions(
+    def test_multiple_active_levels_are_generated_sequentially(
         self, config_dict, manifest_path, codegen_setup, queued_invoke
     ):
+        """active_levels naming more than one level generates each in turn."""
         codegen_setup()
-        queued_invoke("query_codegen", [])
+        cfg = LoadedConfig(config_dict).resolve_stage("query_codegen")
+        no_hints_header = cfg.gen_project_root / "basic.hpp"
+        all_hints_header = cfg.gen_project_root / "full.hpp"
+        all_hints_header.write_text(GOOD_HEADER % {"ns": "full"}, encoding="utf-8")
+        store = ArtifactStore(cfg.artifacts_dir)
+        store.put_json(
+            "hppgen",
+            "storage_layout_headers",
+            {
+                "headers": {
+                    "no_hints": str(no_hints_header),
+                    "all_hints": str(all_hints_header),
+                },
+                "detail": {},
+            },
+        )
+
+        calls = queued_invoke(
+            "query_codegen",
+            [
+                {"source_code": _engine_source("Alice,1")},
+                {"source_code": _engine_source("Alice,1")},
+            ],
+        )
+        # Sources are nested under the level name once more than one level is
+        # active (see query_codegen._source_path), so the run command must
+        # follow suit via the {level} placeholder.
+        level_run_command = (
+            "sh -c 'g++ -std=c++20 -o engine_{level}_{query_id} "
+            "src/queries/{level}/{query_id}.cpp "
+            "&& ./engine_{level}_{query_id} > {output}'"
+        )
         config = _config(
-            config_dict, {"query_codegen": {"active_levels": ["no_hints", "all_hints"]}}
+            config_dict,
+            _codegen_stage(
+                params={"run_command": level_run_command},
+                active_levels=["no_hints", "all_hints"],
+            ),
         )
         summary = _run(config, manifest_path, "query_codegen")
-        assert not summary.ok
-        assert "one level at a time" in summary.results[0].error
-        assert "once per level" in summary.results[0].error
+        assert summary.ok, summary.report()
+
+        assert len(calls) == 2
+        assert calls[0]["namespace"] == "basic"
+        assert calls[1]["namespace"] == "full"
+
+        metrics = summary.results[0].metrics
+        assert metrics["levels"] == 2
+        assert metrics["levels_verified"] == 2
+        assert metrics["verified"] is True
+
+        # Primary artifacts reflect the last level generated; both levels
+        # wrote their own artifacts to the store along the way.
+        report = summary.results[0].artifacts["correctness_report"].read_json()
+        assert report["level"] == "all_hints"
 
     def test_a_missing_header_for_the_level_says_to_run_hppgen(
         self, config_dict, manifest_path, codegen_setup, queued_invoke

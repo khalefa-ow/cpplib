@@ -93,11 +93,21 @@ def stage_context(stage: str) -> Iterator[str]:
 
 
 @contextlib.contextmanager
-def new_span(kind: str, name: str = "", **meta: Any) -> Iterator[Span]:
+def new_span(
+    kind: str, name: str = "", writer: Optional[Any] = None, **meta: Any
+) -> Iterator[Span]:
     """Open a child of the current span for the duration of the block.
 
     The span is pushed before the body runs, so anything the body triggers -
     including DSPy callbacks fired deep inside a module - sees it as the parent.
+
+    ``writer`` is optional and defaults to ``None`` so this stays a no-op for
+    every existing caller. When given a :class:`~agent.trace.callbacks.TraceWriter`,
+    a ``{kind}_start``/``{kind}_end`` record is written for the span, in the same
+    shape ``JsonlTraceCallback`` uses for DSPy events - this is what lets
+    non-DSPy structure (a pipeline stage's per-level or per-query loop) show up
+    in the trace at all, instead of only being visible as ambient parentage on
+    the DSPy events nested inside it.
     """
     span = Span(
         span_id=new_id(),
@@ -108,12 +118,38 @@ def new_span(kind: str, name: str = "", **meta: Any) -> Iterator[Span]:
         name=name,
         meta=dict(meta),
     )
+    if writer is not None:
+        writer.write(
+            {
+                "event": f"{kind}_start",
+                "kind": kind,
+                "name": name,
+                "run_id": span.run_id,
+                "stage": span.stage,
+                "span_id": span.span_id,
+                "parent_span_id": span.parent_span_id,
+                "inputs": dict(meta),
+            }
+        )
     token = _span_stack.set(_span_stack.get() + (span.span_id,))
     try:
         yield span
     finally:
         span.ended_at = time.time()
         _span_stack.reset(token)
+        if writer is not None:
+            writer.write(
+                {
+                    "event": f"{kind}_end",
+                    "kind": kind,
+                    "name": name,
+                    "run_id": span.run_id,
+                    "stage": span.stage,
+                    "span_id": span.span_id,
+                    "parent_span_id": span.parent_span_id,
+                    "duration_ms": span.duration_ms(),
+                }
+            )
 
 
 def push_span(span_id: str) -> Any:

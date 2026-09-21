@@ -1,15 +1,16 @@
 """Manifest models and template scanning for the prompt registry.
 
-Prompts stay as plain ``.txt`` files on disk (easy to read, diff and hand-edit)
-while the manifest JSON carries the metadata the workflow needs: which stage a
-prompt belongs to, what placeholders it requires, which fragments it composes
-with, and a content hash used for cache invalidation.
+Prompt text lives inline in the manifest JSON, alongside the metadata the
+workflow needs: which stage a prompt belongs to, what placeholders it
+requires, and which fragments it composes with. There is exactly one source
+of truth on disk, so a fingerprint can hash ``text`` directly at cache-key
+time rather than comparing against a separately stored digest — there is
+nothing for that digest to go stale against.
 """
 
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 from string import Template
 from typing import Literal, Optional
 
@@ -60,38 +61,41 @@ def scan_placeholders(text: str) -> tuple[list[str], list[str]]:
 
 
 class PromptEntry(BaseModel):
-    """One prompt file plus its metadata.
+    """One prompt's text plus its metadata.
 
     ``stage``, ``role``, ``description`` and ``composes`` are meant to be
     hand-edited; :mod:`agent.prompting.build_manifest` preserves them across
-    rebuilds. ``placeholders`` and ``sha256`` are always regenerated from the
-    file, so editing them by hand has no effect.
+    rebuilds. ``text`` is the prompt template itself and is always the
+    current one — :meth:`fingerprint` hashes it directly rather than trusting
+    a separately stored digest, so a hand edit to ``text`` invalidates the
+    right caches immediately, with no rebuild step required for that to be
+    true. ``placeholders`` is likewise informational (``render()`` rescans
+    ``text`` itself); it is kept for ``prompts list``/``prompts build`` to
+    display without rendering.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    file: Path
+    text: str = ""
     stage: Optional[str] = None
     role: PromptRole = "task"
     placeholders: list[str] = Field(default_factory=list)
     # placeholder name -> prompt id that supplies its text
     composes: dict[str, str] = Field(default_factory=dict)
-    sha256: str = ""
     version: int = 1
     description: str = ""
 
     def fingerprint(self) -> str:
-        """Identity for cache keying: content hash plus manifest version."""
-        return f"{self.id}@{self.version}:{self.sha256[:16]}"
+        """Identity for cache keying: manifest version plus a hash of the current text."""
+        return f"{self.id}@{self.version}:{sha256_text(self.text)[:16]}"
 
 
 class PromptManifest(BaseModel):
-    """The manifest document: a prompts root plus the entries under it."""
+    """The manifest document: every prompt entry, keyed by id."""
 
     model_config = ConfigDict(extra="forbid")
 
-    prompts_root: Path
     entries: dict[str, PromptEntry] = Field(default_factory=dict)
 
     def sorted_entries(self) -> list[PromptEntry]:

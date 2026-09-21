@@ -143,7 +143,8 @@ class QueryRunner:
     Args:
         template: ``params.run_command``. Placeholders: ``{query_id}``,
             ``{query_text}``, ``{output}``, ``{project_root}``, ``{build_dir}``,
-            ``{dataset_dir}``, ``{sf}`` and ``{trace}``.
+            ``{dataset_dir}``, ``{sf}``, ``{trace}`` and ``{level}`` (the active
+            hint level's name, empty outside a level-aware caller).
         project_root: Working directory for the command.
         output_dir: Where ``{output}`` files are written.
         trace_flag: Substituted for ``{trace}`` when tracing is requested, and
@@ -192,11 +193,16 @@ class QueryRunner:
     def output_path_for(self, query: Query) -> Path:
         return self.output_dir / f"{query.slug}.out"
 
-    def run(self, query: Query, trace: bool = False) -> RunOutcome:
+    def run(self, query: Query, trace: bool = False, level: str = "") -> RunOutcome:
         """Execute one query once.
 
         Output is read from the ``{output}`` file when the template names one,
         and from stdout otherwise, so both harness conventions work.
+
+        Args:
+            level: The active hint level's name, for templates that build a
+                level-specific binary or read a level-specific source tree
+                (e.g. ``"build/{level}/engine --query {query_id} ..."``).
         """
         if not self.available():
             return RunOutcome(query_id=query.id, ok=False, stderr=self.unavailable_reason())
@@ -218,6 +224,7 @@ class QueryRunner:
             dataset_dir=str(self.dataset_dir or ""),
             sf=self.sf,
             trace=self.trace_flag if trace else "",
+            level=level,
         )
 
         started = time.perf_counter()

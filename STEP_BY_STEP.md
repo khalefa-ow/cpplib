@@ -12,13 +12,16 @@ python -m agent.cli doctor
 
 You should see all checks pass. If not, install the missing tool (Deno, cmake, g++, or set your API key).
 
-### 2. Rebuild Prompts
+### 2. (Optional) Resync Prompt Metadata
+
+Prompt text lives inline in `agent/prompting/manifest.json` (each entry has a
+`text` field), so there's nothing to rebuild unless you've just edited a
+prompt. After editing one (via `prompts set` or by hand), resync its derived
+`placeholders`:
 
 ```bash
 python -m agent.cli prompts build
 ```
-
-This reads `agent/prompts/*.txt` and generates `agent/prompting/manifest.json`.
 
 ### 3. View Your Config
 
@@ -293,7 +296,7 @@ python -m agent.cli config show agent/examples/config.example.json
 ### View a Prompt
 
 ```bash
-python -m agent.cli prompts show storage_plan_policy --text-only
+python -m agent.cli prompts show storage_plan_policy --raw
 ```
 
 ### Check Artifacts

@@ -81,12 +81,40 @@ def _traced(
     return decorate
 
 
+def _auto_build_note(ws: CppWorkspace, writer: Optional[TraceWriter]) -> str:
+    """Build the whole project after an edit and report the outcome.
+
+    Traced the same way a tool call is, so it shows up as its own step rather
+    than being folded silently into the write tool's record.
+    """
+    with new_span("cpp_tool", "auto_build") as span:
+        result = ws.build_project()
+        if writer is not None:
+            writer.write(
+                {
+                    "event": "cpp_tool",
+                    "kind": "tool",
+                    "name": "auto_build",
+                    "run_id": current_run_id(),
+                    "stage": current_stage(),
+                    "span_id": span.span_id,
+                    "parent_span_id": span.parent_span_id or current_span_id(),
+                    "inputs": {},
+                    "outputs": result.brief(),
+                    "duration_ms": span.duration_ms(),
+                    "error": None if result.ok else result.brief(),
+                }
+            )
+    return f"\n[auto-build] {result.brief()}"
+
+
 def make_cpp_tools(
     ws: CppWorkspace,
     writer: Optional[TraceWriter] = None,
     allow_writes: bool = True,
     allow_build: bool = True,
     run_query: Optional[Callable[[str, str], str]] = None,
+    auto_build: bool = False,
 ) -> list[Callable[..., str]]:
     """Build the tool list for a :class:`CppWorkspace`.
 
@@ -99,10 +127,15 @@ def make_cpp_tools(
         allow_build: Expose ``compile_file`` / ``build_project``.
         run_query: Optional ``(query_id, params) -> output`` callable. Left None,
             no execution tool is exposed at all.
+        auto_build: When both writes and building are allowed, run
+            ``build_project()`` automatically after every successful mutating
+            tool call and append its result. Off by default so it never doubles
+            up with a stage's own explicit compile loop.
 
     Returns:
         Plain callables suitable for ``dspy.RLM(tools=...)``.
     """
+    auto_build = auto_build and allow_writes and allow_build
 
     # --- reading ----------------------------------------------------------
 
@@ -237,7 +270,10 @@ def make_cpp_tools(
             afterwards to check the result.
             """
             edit = ws.write_file(rel_path, content)
-            return f"{edit.action} {edit.path} ({edit.bytes_after} bytes)"
+            report = f"{edit.action} {edit.path} ({edit.bytes_after} bytes)"
+            if auto_build:
+                report += _auto_build_note(ws, writer)
+            return report
 
         @_traced("replace_function", writer)
         def replace_function(rel_path: str, name: str, new_text: str) -> str:
@@ -249,7 +285,10 @@ def make_cpp_tools(
                 new_text: The complete new definition, signature and body.
             """
             edit = ws.replace_function(rel_path, name, new_text)
-            return f"replaced {name} in {edit.path} ({edit.bytes_after} bytes)"
+            report = f"replaced {name} in {edit.path} ({edit.bytes_after} bytes)"
+            if auto_build:
+                report += _auto_build_note(ws, writer)
+            return report
 
         @_traced("apply_patch", writer)
         def apply_patch(patch: str) -> str:
@@ -270,13 +309,20 @@ def make_cpp_tools(
             are relative to the workspace root. Either the whole patch applies
             or none of it does.
             """
-            return ws.apply_patch(patch).summary()
+            patch_result = ws.apply_patch(patch)
+            report = patch_result.summary()
+            if auto_build and patch_result.ok:
+                report += _auto_build_note(ws, writer)
+            return report
 
         @_traced("delete_file", writer)
         def delete_file(rel_path: str) -> str:
             """Delete one file from the workspace."""
             edit = ws.delete_file(rel_path)
-            return f"deleted {edit.path}"
+            report = f"deleted {edit.path}"
+            if auto_build:
+                report += _auto_build_note(ws, writer)
+            return report
 
         tools.extend([write_file, replace_function, apply_patch, delete_file])
 

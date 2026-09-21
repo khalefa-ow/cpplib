@@ -104,6 +104,11 @@ class RLMConfig(_Base):
     # Below this combined input size, RLM's REPL overhead is not worth it and
     # the stage uses a plain predictor instead.
     threshold_chars: int = 100_000
+    # When true, a successful write_file/replace_function/apply_patch/delete_file
+    # tool call triggers a full build_project() automatically, so the model gets
+    # build feedback without having to remember to compile. Off by default so it
+    # never doubles up with a stage's own explicit compile loop (query_codegen).
+    auto_build_after_write: bool = False
 
 
 class CompileConfig(_Base):

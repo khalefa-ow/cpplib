@@ -1,4 +1,4 @@
-"""Prompt manifest building and strict rendering."""
+"""Prompt manifest maintenance and strict rendering."""
 
 import json
 
@@ -10,7 +10,12 @@ from agent.errors import (
     MissingPromptError,
     PromptError,
 )
-from agent.prompting.build_manifest import build_manifest, classify
+from agent.prompting.build_manifest import (
+    classify,
+    import_prompts_dir,
+    rebuild_manifest,
+    set_prompt_text,
+)
 from agent.prompting.manifest import scan_placeholders
 from agent.prompting.registry import PromptRegistry
 
@@ -22,7 +27,7 @@ class TestScanPlaceholders:
         assert problems == []
 
     def test_detects_bare_form(self):
-        """optim_pretext_general.txt uses bare $name, not ${name}."""
+        """optim_pretext_general uses bare $name, not ${name}."""
         names, problems = scan_placeholders("queries at $queries_path with $num_queries")
         assert names == ["queries_path", "num_queries"]
         assert problems == []
@@ -43,22 +48,17 @@ class TestScanPlaceholders:
         assert "line 2" in problems[0]
 
 
-class TestBuildManifest:
-    def test_builds_over_the_real_prompts(self, prompts_dir, tmp_path):
-        manifest = build_manifest(prompts_dir, tmp_path / "m.json", strict=True)
-        assert len(manifest.entries) >= 12
-        assert "optim_w_trace" in manifest.entries
-        assert "storage_plan_policy" in manifest.entries
+class TestImportPromptsDir:
+    """The directory → inline-manifest migration path."""
 
-    def test_records_placeholders_from_the_real_files(self, registry):
-        entry = registry.get("optim_w_trace")
-        assert "query_id" in entry.placeholders
-        assert "constraints" in entry.placeholders
+    def test_imports_over_a_scratch_directory(self, prompts_dir, tmp_path):
+        manifest = import_prompts_dir(prompts_dir, tmp_path / "m.json", strict=True)
+        assert set(manifest.entries) == {"storage_plan_policy", "divide_policy", "optim_constraints"}
+        assert "${query_id}" in manifest.entries["storage_plan_policy"].text
 
-    def test_infers_composes_for_fragment_placeholders(self, registry):
-        assert registry.get("optim_w_trace").composes["constraints"] == "optim_constraints"
-        expert = registry.get("optim_w_expert_knowledge").composes
-        assert expert["expert_knowledge"] == "expert_knowledge"
+    def test_records_placeholders_from_the_imported_text(self, prompts_dir, tmp_path):
+        manifest = import_prompts_dir(prompts_dir, tmp_path / "m.json", strict=True)
+        assert manifest.entries["divide_policy"].placeholders == ["level_names"]
 
     def test_classify_assigns_stage_and_role(self):
         assert classify("optim_constraints") == ("optimize", "fragment")
@@ -69,46 +69,154 @@ class TestBuildManifest:
         assert classify("divide_policy") == ("divide", "task")
         assert classify("something_else") == (None, "task")
 
-    def test_strict_build_fails_on_invalid_dollar(self, prompts_dir, tmp_path):
+    def test_strict_import_fails_on_invalid_dollar(self, prompts_dir, tmp_path):
         (prompts_dir / "broken.txt").write_text("price is $5\n", encoding="utf-8")
         with pytest.raises(InvalidTemplateError):
-            build_manifest(prompts_dir, tmp_path / "m.json", strict=True)
+            import_prompts_dir(prompts_dir, tmp_path / "m.json", strict=True)
 
-    def test_lax_build_tolerates_invalid_dollar(self, prompts_dir, tmp_path):
+    def test_lax_import_tolerates_invalid_dollar(self, prompts_dir, tmp_path):
         (prompts_dir / "broken.txt").write_text("price is $5\n", encoding="utf-8")
-        manifest = build_manifest(prompts_dir, tmp_path / "m.json", strict=False)
+        manifest = import_prompts_dir(prompts_dir, tmp_path / "m.json", strict=False)
         assert "broken" in manifest.entries
 
-    def test_preserves_curated_metadata_across_rebuilds(self, prompts_dir, tmp_path):
+    def test_merges_into_an_existing_manifest_without_touching_other_ids(
+        self, prompts_dir, tmp_path
+    ):
         path = tmp_path / "m.json"
-        build_manifest(prompts_dir, path, strict=True)
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        raw["entries"]["optim_w_trace"]["description"] = "hand written note"
-        raw["entries"]["optim_w_trace"]["stage"] = "custom_stage"
-        path.write_text(json.dumps(raw), encoding="utf-8")
-
-        rebuilt = build_manifest(prompts_dir, path, strict=True)
-        assert rebuilt.entries["optim_w_trace"].description == "hand written note"
-        assert rebuilt.entries["optim_w_trace"].stage == "custom_stage"
+        set_prompt_text(path, "untouched", "some text", strict=True)
+        import_prompts_dir(prompts_dir, path, strict=True)
+        manifest = PromptRegistry.from_manifest(path).manifest
+        assert "untouched" in manifest.entries
+        assert "storage_plan_policy" in manifest.entries
 
     def test_version_bumps_only_when_content_changes(self, prompts_dir, tmp_path):
         path = tmp_path / "m.json"
-        first = build_manifest(prompts_dir, path, strict=True)
+        first = import_prompts_dir(prompts_dir, path, strict=True)
         assert first.entries["optim_constraints"].version == 1
 
-        unchanged = build_manifest(prompts_dir, path, strict=True)
+        unchanged = import_prompts_dir(prompts_dir, path, strict=True)
         assert unchanged.entries["optim_constraints"].version == 1
 
         target = prompts_dir / "optim_constraints.txt"
         target.write_text(target.read_text(encoding="utf-8") + "\n- extra rule\n", encoding="utf-8")
-        bumped = build_manifest(prompts_dir, path, strict=True)
+        bumped = import_prompts_dir(prompts_dir, path, strict=True)
         assert bumped.entries["optim_constraints"].version == 2
 
     def test_empty_directory_is_an_error(self, tmp_path):
         empty = tmp_path / "empty"
         empty.mkdir()
         with pytest.raises(PromptError, match="No prompt files"):
-            build_manifest(empty, tmp_path / "m.json")
+            import_prompts_dir(empty, tmp_path / "m.json")
+
+
+class TestRebuildManifest:
+    """The everyday path: recompute derived fields from each entry's own text."""
+
+    def test_recomputes_over_the_real_manifest(self, manifest_path):
+        manifest = rebuild_manifest(manifest_path, strict=True)
+        assert "optim_w_trace" in manifest.entries
+        assert "storage_plan_policy" in manifest.entries
+        assert len(manifest.entries) >= 12
+
+    def test_hand_edited_text_leaves_the_version_untouched(self, manifest_path):
+        """rebuild_manifest has no snapshot of the pre-edit text to diff
+        against (the manifest is both its input and output), so it cannot
+        detect the edit to bump version. That's fine: fingerprint() hashes
+        text directly, so cache invalidation does not depend on this."""
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        before_version = raw["entries"]["optim_constraints"]["version"]
+        raw["entries"]["optim_constraints"]["text"] += "\n- one more rule\n"
+        manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+
+        rebuilt = rebuild_manifest(manifest_path, strict=True)
+        assert rebuilt.entries["optim_constraints"].version == before_version
+
+    def test_unchanged_text_keeps_the_version(self, manifest_path):
+        before = rebuild_manifest(manifest_path, strict=True)
+        again = rebuild_manifest(manifest_path, strict=True)
+        assert (
+            before.entries["optim_constraints"].version
+            == again.entries["optim_constraints"].version
+        )
+
+    def test_preserves_curated_metadata(self, manifest_path):
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        raw["entries"]["optim_w_trace"]["description"] = "hand written note"
+        raw["entries"]["optim_w_trace"]["stage"] = "custom_stage"
+        manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+
+        rebuilt = rebuild_manifest(manifest_path, strict=True)
+        assert rebuilt.entries["optim_w_trace"].description == "hand written note"
+        assert rebuilt.entries["optim_w_trace"].stage == "custom_stage"
+
+    def test_strict_rebuild_fails_on_invalid_dollar(self, manifest_path):
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        raw["entries"]["optim_constraints"]["text"] = "price is $5"
+        manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(InvalidTemplateError):
+            rebuild_manifest(manifest_path, strict=True)
+
+    def test_lax_rebuild_tolerates_invalid_dollar(self, manifest_path):
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        raw["entries"]["optim_constraints"]["text"] = "price is $5"
+        manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        manifest = rebuild_manifest(manifest_path, strict=False)
+        assert "optim_constraints" in manifest.entries
+
+    def test_missing_manifest_is_an_error(self, tmp_path):
+        with pytest.raises(PromptError, match="not found"):
+            rebuild_manifest(tmp_path / "nope.json")
+
+    def test_empty_manifest_is_an_error(self, tmp_path):
+        path = tmp_path / "empty.json"
+        path.write_text(json.dumps({"entries": {}}), encoding="utf-8")
+        with pytest.raises(PromptError, match="no entries"):
+            rebuild_manifest(path)
+
+
+class TestSetPromptText:
+    def test_adds_a_new_entry(self, manifest_path):
+        manifest = set_prompt_text(manifest_path, "greeting", "Hello, ${name}!")
+        entry = manifest.entries["greeting"]
+        assert entry.text == "Hello, ${name}!"
+        assert entry.placeholders == ["name"]
+        assert entry.version == 1
+
+    def test_updates_an_existing_entry_and_bumps_version(self, manifest_path):
+        before = PromptRegistry.from_manifest(manifest_path).get("optim_constraints")
+        manifest = set_prompt_text(manifest_path, "optim_constraints", "New text.")
+        after = manifest.entries["optim_constraints"]
+        assert after.text == "New text."
+        assert after.version == before.version + 1
+        assert after.stage == before.stage  # curated field preserved
+
+    def test_explicit_metadata_overrides_curated_fields(self, manifest_path):
+        manifest = set_prompt_text(
+            manifest_path,
+            "optim_constraints",
+            "New text.",
+            stage="custom",
+            role="knowledge",
+            description="note",
+        )
+        entry = manifest.entries["optim_constraints"]
+        assert entry.stage == "custom"
+        assert entry.role == "knowledge"
+        assert entry.description == "note"
+
+    def test_strict_set_fails_on_invalid_dollar(self, manifest_path):
+        with pytest.raises(InvalidTemplateError):
+            set_prompt_text(manifest_path, "broken", "price is $5", strict=True)
+
+    def test_lax_set_tolerates_invalid_dollar(self, manifest_path):
+        manifest = set_prompt_text(manifest_path, "broken", "price is $5", strict=False)
+        assert "broken" in manifest.entries
+
+    def test_creates_a_manifest_that_does_not_exist_yet(self, tmp_path):
+        path = tmp_path / "new.json"
+        manifest = set_prompt_text(path, "first", "text")
+        assert path.exists()
+        assert "first" in manifest.entries
 
 
 class TestRendering:
@@ -177,33 +285,37 @@ class TestFingerprints:
             "optim_constraints"
         )
 
-    def test_fingerprint_changes_when_the_file_changes(self, prompts_dir, tmp_path):
-        path = tmp_path / "m.json"
-        build_manifest(prompts_dir, path, strict=True)
-        before = PromptRegistry.from_manifest(path).fingerprint("optim_constraints")
+    def test_fingerprint_changes_the_moment_text_is_edited(self, manifest_path):
+        """No rebuild needed: the fingerprint hashes text directly, so a bare
+        hand edit invalidates the right cache entries immediately."""
+        before = PromptRegistry.from_manifest(manifest_path).fingerprint("optim_constraints")
 
-        target = prompts_dir / "optim_constraints.txt"
-        target.write_text(target.read_text(encoding="utf-8") + "\n- new rule\n", encoding="utf-8")
-        build_manifest(prompts_dir, path, strict=True)
-        after = PromptRegistry.from_manifest(path).fingerprint("optim_constraints")
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        raw["entries"]["optim_constraints"]["text"] += "\n- new rule\n"
+        manifest_path.write_text(json.dumps(raw), encoding="utf-8")
 
+        after = PromptRegistry.from_manifest(manifest_path).fingerprint("optim_constraints")
         # This is what makes editing a prompt invalidate its cached completions.
+        assert before != after
+
+    def test_rebuild_does_not_undo_the_fingerprint_change(self, manifest_path):
+        """A rebuild after the edit still leaves the fingerprint changed —
+        rebuild_manifest doesn't bump version here (see TestRebuildManifest),
+        but that's irrelevant: the fingerprint already reflects the new text."""
+        before = PromptRegistry.from_manifest(manifest_path).fingerprint("optim_constraints")
+
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        raw["entries"]["optim_constraints"]["text"] += "\n- new rule\n"
+        manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        rebuild_manifest(manifest_path, strict=True)
+
+        after = PromptRegistry.from_manifest(manifest_path).fingerprint("optim_constraints")
         assert before != after
 
     def test_rendered_fingerprint_covers_injected_fragments(self, registry):
         out = registry.render("optim_with_sample_plan", query_id="1", sf="0.2", duckdb_plan="X")
         assert out.fingerprint == registry.fingerprint(*out.prompt_ids)
         assert len(out.prompt_ids) == 2
-
-
-class TestStaleDetection:
-    def test_editing_a_file_without_rebuilding_is_detected(self, prompts_dir, manifest_path):
-        """A stale manifest means stale placeholders and stale cache keys."""
-        registry = PromptRegistry.from_manifest(manifest_path)
-        target = prompts_dir / "optim_constraints.txt"
-        target.write_text("totally different content\n", encoding="utf-8")
-        with pytest.raises(PromptError, match="has changed since the manifest was built"):
-            registry.text_of("optim_constraints")
 
 
 class TestRenderAny:

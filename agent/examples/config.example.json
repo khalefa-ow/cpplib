@@ -79,12 +79,12 @@
     },
     "hppgen": {
       "enabled": true,
-      "active_levels": ["no_hints"],
+      "active_levels": ["no_hints", "organization_level", "all_hints"],
       "cache": { "dir": "out/.cache/hppgen" }
     },
     "query_codegen": {
       "enabled": true,
-      "active_levels": ["no_hints"],
+      "active_levels": ["no_hints", "organization_level", "all_hints"],
       "prompt_ids": ["query_codegen_task", "fix_compile_errors"],
       "cache": { "dir": "out/.cache/query_codegen" },
       "prompt_vars": {

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PROMPTS_DIR = REPO_ROOT / "prompts"
+REAL_MANIFEST = REPO_ROOT / "agent" / "prompting" / "manifest.json"
 
 
 @pytest.fixture(autouse=True)
@@ -33,19 +33,32 @@ def no_provider_keys(monkeypatch):
 
 @pytest.fixture
 def prompts_dir(tmp_path):
-    """A copy of the real prompts directory, safe to mutate."""
-    target = tmp_path / "prompts"
-    shutil.copytree(PROMPTS_DIR, target)
+    """A small scratch directory of .txt prompt files.
+
+    Independent of the real (now inline-in-manifest) prompt corpus, used only
+    to exercise the directory-import migration path
+    (``agent.prompting.import_prompts_dir`` / ``prompts build --prompts-dir``).
+    """
+    target = tmp_path / "prompts_src"
+    target.mkdir()
+    (target / "storage_plan_policy.txt").write_text(
+        "Policy for query ${query_id}: use only schema facts.\n", encoding="utf-8"
+    )
+    (target / "divide_policy.txt").write_text(
+        "Split the schema into levels: ${level_names}.\n", encoding="utf-8"
+    )
+    (target / "optim_constraints.txt").write_text(
+        "Hard constraints:\n- Keep results correct.\n- Do not remove columns.\n",
+        encoding="utf-8",
+    )
     return target
 
 
 @pytest.fixture
-def manifest_path(tmp_path, prompts_dir):
-    """A freshly built manifest over the copied prompts."""
-    from agent.prompting.build_manifest import build_manifest
-
+def manifest_path(tmp_path):
+    """A copy of the real prompt manifest (inline text), safe to mutate."""
     path = tmp_path / "manifest.json"
-    build_manifest(prompts_dir, path, strict=True)
+    shutil.copy(REAL_MANIFEST, path)
     return path
 
 
