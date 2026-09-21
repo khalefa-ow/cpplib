@@ -2,14 +2,21 @@
 
 import http.client
 import json
+import shutil
+import subprocess
 import threading
 
+import pytest
+
 from agent.trace.webview import (
+    _PAGE,
     _TraceRequestHandler,
     _TraceServer,
     build_steps,
     parse_trace_file,
 )
+
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="no node.js")
 
 # One level -> one query -> one module -> one lm call, the shape query_codegen's
 # span nesting produces once level/query spans are given a writer.
@@ -29,6 +36,7 @@ LEVEL_QUERY_LM_RECORDS = [
         "run_id": "run1", "stage": "query_codegen", "call_id": "c1",
         "span_id": "mod1", "parent_span_id": "qry1", "ts": 1.2,
         "inputs": {"question": "generate q1"},
+        "tools": ["read_function", "write_file"],
     },
     {
         "event": "lm_start", "kind": "lm", "name": "gpt-4",
@@ -95,6 +103,8 @@ class TestBuildSteps:
         step = steps[0]
         assert step["stage"] == "query_codegen"
         assert step["model"] == "gpt-4"
+        assert step["module"] == "ChainOfThought"
+        assert step["tools"] == ["read_function", "write_file"]
         assert step["breadcrumb"] == ["level=hint_0", "query=q1", "module=ChainOfThought"]
         assert step["duration_ms"] == 100.0
         assert step["usage"] == {"prompt_tokens": 10, "completion_tokens": 5}
@@ -107,6 +117,52 @@ class TestBuildSteps:
         steps = build_steps(LEVEL_QUERY_LM_RECORDS)
         span_ids = {s["span_id"] for s in steps}
         assert span_ids == {"lm1"}
+
+    def test_module_is_none_without_a_module_ancestor(self):
+        records = [
+            {
+                "event": "lm_start", "kind": "lm", "name": "gpt-4",
+                "run_id": "run1", "stage": "s", "span_id": "lm1", "parent_span_id": None, "ts": 1.0,
+            },
+            {
+                "event": "lm_end", "kind": "lm", "name": "gpt-4",
+                "run_id": "run1", "stage": "s", "span_id": "lm1", "parent_span_id": None, "ts": 1.1,
+            },
+        ]
+        steps = build_steps(records)
+        assert steps[0]["module"] is None
+        assert steps[0]["tools"] == []
+
+    def test_module_resolves_to_the_nearest_ancestor(self):
+        """An RLM call nests a ``CppRLM`` module span around an inner ``RLM`` one.
+
+        The inner, nearer module - the one that actually produced the LM
+        sub-call - should win over the outer wrapper, and its tools travel
+        with it.
+        """
+        records = [
+            {
+                "event": "module_start", "kind": "module", "name": "CppRLM",
+                "run_id": "run1", "stage": "s", "span_id": "outer", "parent_span_id": None, "ts": 1.0,
+                "tools": ["compile_file", "build_project"],
+            },
+            {
+                "event": "module_start", "kind": "module", "name": "RLM",
+                "run_id": "run1", "stage": "s", "span_id": "inner", "parent_span_id": "outer", "ts": 1.1,
+                "tools": ["compile_file", "build_project"],
+            },
+            {
+                "event": "lm_start", "kind": "lm", "name": "gpt-4",
+                "run_id": "run1", "stage": "s", "span_id": "lm1", "parent_span_id": "inner", "ts": 1.2,
+            },
+            {
+                "event": "lm_end", "kind": "lm", "name": "gpt-4",
+                "run_id": "run1", "stage": "s", "span_id": "lm1", "parent_span_id": "inner", "ts": 1.3,
+            },
+        ]
+        steps = build_steps(records)
+        assert steps[0]["module"] == "RLM"
+        assert steps[0]["tools"] == ["compile_file", "build_project"]
 
     def test_steps_are_ordered_and_indexed_by_timestamp(self):
         earlier = {
@@ -218,3 +274,76 @@ class TestServer:
             assert second["steps"][0]["outputs"] == {"text": "answer"}
         finally:
             self._stop(server, thread)
+
+
+class TestPageRendering:
+    """Guards the page's ``fmt``/``escapeHtml`` JS against regressing.
+
+    C++ source is full of "<...>" (templates, includes), so text inserted into
+    the page via innerHTML without escaping gets parsed as HTML tags and can
+    visually disappear - this is what made some responses look empty. These
+    tests run the actual JS the page serves (via node), not a Python
+    reimplementation of it, so they catch a regression in the real logic.
+    """
+
+    def _run_js(self, js: str) -> str:
+        script = _PAGE[_PAGE.index("function escapeHtml") : _PAGE.index("function render()")]
+        result = subprocess.run(
+            ["node", "-e", script + js], capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    @needs_node
+    def test_angle_brackets_are_escaped(self):
+        out = self._run_js('console.log(fmt("std::vector<int> v;"));')
+        assert out.strip() == "std::vector&lt;int&gt; v;"
+
+    @needs_node
+    def test_embedded_newlines_in_json_become_real_line_breaks(self):
+        out = self._run_js(
+            'console.log(JSON.stringify(fmt({"content": "line one\\nline two"})));'
+        )
+        # JSON-encoding the *test's* own stdout is just how the real newline
+        # survives the round trip back out of node; a literal backslash-n
+        # would appear here as the two characters \\n instead of \n.
+        assert "line one\\nline two" in out
+        assert "line one\\\\nline two" not in out
+
+    @needs_node
+    def test_plain_strings_are_escaped_too(self):
+        out = self._run_js('console.log(fmt("a < b && b > c"));')
+        assert out.strip() == "a &lt; b &amp;&amp; b &gt; c"
+
+    @needs_node
+    def test_module_badge_escapes_its_name(self):
+        out = self._run_js('console.log(moduleBadge("<img src=x onerror=alert(1)>"));')
+        assert "<img" not in out
+        assert "&lt;img" in out
+
+    @needs_node
+    def test_module_badge_is_empty_for_no_module(self):
+        out = self._run_js('console.log(JSON.stringify(moduleBadge(null)));')
+        assert out.strip() == '""'
+
+    @needs_node
+    def test_tools_list_is_escaped_per_entry(self):
+        out = self._run_js(
+            'console.log(["a", "<script>"].map(escapeHtml).join(", "));'
+        )
+        assert out.strip() == "a, &lt;script&gt;"
+
+    def test_page_uses_escapeHtml_for_every_raw_field(self):
+        """A cheaper, node-free guard: every raw trace field goes through fmt/escapeHtml."""
+        main_fn = _PAGE[_PAGE.index("function renderMain") : _PAGE.index("function poll")]
+        assert "escapeHtml(s.model" in main_fn
+        assert "escapeHtml(s.breadcrumb" in main_fn
+        assert "escapeHtml(s.error)" in main_fn
+        assert "fmt(s.inputs)" in main_fn
+        assert "fmt(s.outputs)" in main_fn
+        assert "moduleBadge(s.module)" in main_fn
+        assert "s.tools.map(escapeHtml)" in main_fn
+
+    def test_sidebar_also_uses_module_badge(self):
+        render_fn = _PAGE[_PAGE.index("function render()") : _PAGE.index("function renderMain")]
+        assert "moduleBadge(s.module)" in render_fn

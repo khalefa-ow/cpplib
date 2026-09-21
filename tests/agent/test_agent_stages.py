@@ -311,6 +311,65 @@ class TestHppGenStage:
         # The repair call saw the real diagnostics, not a generic message.
         assert "error:" in calls[1]["report"]
 
+    def test_repair_call_gets_workspace_tools_when_rlm_tools_is_enabled(
+        self, config_dict, manifest_path, levels_artifact, monkeypatch
+    ):
+        levels_artifact()
+        queue = [
+            {"header_code": BROKEN_HEADER % {"ns": "basic"}},
+            {"fixed_code": GOOD_HEADER % {"ns": "basic"}, "explanation": "added the include"},
+        ]
+        captured: list[dict] = []
+
+        def fake_invoke(signature, payload, outputs, **kwargs):
+            captured.append(kwargs)
+            value = queue.pop(0) if queue else {}
+            result = {name: value.get(name, "") for name in outputs}
+            result["predictor"] = "Fake"
+            result["usage"] = {}
+            return result
+
+        monkeypatch.setattr("agent.stages.hppgen.invoke", fake_invoke)
+        config = _config(
+            config_dict,
+            {"hppgen": {"active_levels": ["no_hints"], "params": {"rlm_tools": True}}},
+        )
+        summary = _run(config, manifest_path, "hppgen")
+        assert summary.ok, summary.report()
+
+        assert len(captured) == 2
+        for kwargs in captured:
+            assert kwargs["workspace"] is not None
+            assert kwargs["allow_writes"] is True
+            assert kwargs["allow_build"] is True
+
+    def test_repair_call_has_no_workspace_when_rlm_tools_is_unset(
+        self, config_dict, manifest_path, levels_artifact, monkeypatch
+    ):
+        levels_artifact()
+        queue = [
+            {"header_code": BROKEN_HEADER % {"ns": "basic"}},
+            {"fixed_code": GOOD_HEADER % {"ns": "basic"}, "explanation": "added the include"},
+        ]
+        captured: list[dict] = []
+
+        def fake_invoke(signature, payload, outputs, **kwargs):
+            captured.append(kwargs)
+            value = queue.pop(0) if queue else {}
+            result = {name: value.get(name, "") for name in outputs}
+            result["predictor"] = "Fake"
+            result["usage"] = {}
+            return result
+
+        monkeypatch.setattr("agent.stages.hppgen.invoke", fake_invoke)
+        config = _config(config_dict, {"hppgen": {"active_levels": ["no_hints"]}})
+        summary = _run(config, manifest_path, "hppgen")
+        assert summary.ok, summary.report()
+
+        assert len(captured) == 2
+        for kwargs in captured:
+            assert kwargs["workspace"] is None
+
     def test_the_fix_budget_is_enforced_and_the_artifact_still_written(
         self, config_dict, manifest_path, levels_artifact, queued_invoke
     ):
@@ -535,6 +594,61 @@ class TestQueryCodegenStage:
         assert row["compile_rounds"] == 1
         assert row["correctness_rounds"] == 0
         assert "error:" in calls[1]["report"]
+
+    def test_repair_call_gets_workspace_tools_when_rlm_tools_is_enabled(
+        self, config_dict, manifest_path, codegen_setup, monkeypatch
+    ):
+        codegen_setup()
+        queue = [
+            {"source_code": BROKEN_SOURCE},
+            {"fixed_code": _engine_source("Alice,1"), "explanation": "closed the statement"},
+        ]
+        captured: list[dict] = []
+
+        def fake_invoke(signature, payload, outputs, **kwargs):
+            captured.append(kwargs)
+            value = queue.pop(0) if queue else {}
+            result = {name: value.get(name, "") for name in outputs}
+            result["predictor"] = "Fake"
+            result["usage"] = {}
+            return result
+
+        monkeypatch.setattr("agent.stages.query_codegen.invoke", fake_invoke)
+        config = _config(config_dict, _codegen_stage(params={"rlm_tools": True}))
+        summary = _run(config, manifest_path, "query_codegen")
+        assert summary.ok, summary.report()
+
+        assert len(captured) == 2
+        for kwargs in captured:
+            assert kwargs["workspace"] is not None
+            assert kwargs["allow_writes"] is True
+            assert kwargs["allow_build"] is True
+
+    def test_repair_call_has_no_workspace_when_rlm_tools_is_unset(
+        self, config_dict, manifest_path, codegen_setup, monkeypatch
+    ):
+        codegen_setup()
+        queue = [
+            {"source_code": BROKEN_SOURCE},
+            {"fixed_code": _engine_source("Alice,1"), "explanation": "closed the statement"},
+        ]
+        captured: list[dict] = []
+
+        def fake_invoke(signature, payload, outputs, **kwargs):
+            captured.append(kwargs)
+            value = queue.pop(0) if queue else {}
+            result = {name: value.get(name, "") for name in outputs}
+            result["predictor"] = "Fake"
+            result["usage"] = {}
+            return result
+
+        monkeypatch.setattr("agent.stages.query_codegen.invoke", fake_invoke)
+        summary = _run(_config(config_dict, _codegen_stage()), manifest_path, "query_codegen")
+        assert summary.ok, summary.report()
+
+        assert len(captured) == 2
+        for kwargs in captured:
+            assert kwargs["workspace"] is None
 
     def test_a_wrong_result_is_repaired_within_the_correctness_budget(
         self, config_dict, manifest_path, codegen_setup, queued_invoke

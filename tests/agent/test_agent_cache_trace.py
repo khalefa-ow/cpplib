@@ -325,6 +325,45 @@ class TestCallbackNesting:
         assert writer.records[-1]["event"] == "module_end"
 
 
+class TestModuleToolNames:
+    """A module_start record names the tools that module was built with."""
+
+    def test_a_public_tools_list_is_recorded(self):
+        """CppRLM's own shape: a plain list of functions with __name__."""
+
+        def read_function():
+            pass
+
+        def write_file():
+            pass
+
+        instance = type("CppRLM", (), {"tools": [read_function, write_file]})()
+        writer = TraceWriter()
+        callback = JsonlTraceCallback(writer)
+        with run_context():
+            callback.on_module_start("m", instance, {})
+        assert writer.records[-1]["tools"] == ["read_function", "write_file"]
+
+    def test_a_private_user_tools_dict_is_recorded(self):
+        """dspy.RLM's own shape: a dict[str, Tool] on ``_user_tools``."""
+        instance = type(
+            "RLM", (), {"_user_tools": {"write_file": object(), "read_function": object()}}
+        )()
+        writer = TraceWriter()
+        callback = JsonlTraceCallback(writer)
+        with run_context():
+            callback.on_module_start("m", instance, {})
+        assert writer.records[-1]["tools"] == ["read_function", "write_file"]
+
+    def test_a_module_without_tools_omits_the_field(self):
+        """Plain Predict/ChainOfThought instances carry no tools at all."""
+        writer = TraceWriter()
+        callback = JsonlTraceCallback(writer)
+        with run_context():
+            callback.on_module_start("m", object(), {})
+        assert "tools" not in writer.records[-1]
+
+
 class TestIntegrations:
     def test_disabled_by_default(self):
         assert maybe_init_weave(TraceConfig()) is None

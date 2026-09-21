@@ -27,6 +27,7 @@ from agent import __version__
 from agent.errors import AgentError
 
 if TYPE_CHECKING:
+    from agent.config.loader import LoadedConfig
     from agent.pipeline import Pipeline
 
 # Load environment variables from .env file if it exists
@@ -144,12 +145,34 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 
 
+def _apply_cache_override(config: "LoadedConfig", no_cache: bool, refresh_cache: bool) -> None:
+    """Force every stage's cache behavior from the CLI, overriding the config file.
+
+    Mutates ``config.raw`` (what ``LoadedConfig.resolve_stage`` actually merges
+    from) before any stage resolves, and also strips per-stage ``cache``
+    overrides so a stage-specific cache block in the config file cannot
+    silently re-enable what ``--no-cache``/``--refresh-cache`` turned on.
+    """
+    if not no_cache and not refresh_cache:
+        return
+    common = config.raw.setdefault("common", {})
+    cache = dict(common.get("cache") or {})
+    if no_cache:
+        cache["enabled"] = False
+    if refresh_cache:
+        cache["refresh"] = True
+    common["cache"] = cache
+    for stage_cfg in (config.raw.get("stages") or {}).values():
+        stage_cfg.pop("cache", None)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     from agent.config.loader import LoadedConfig
     from agent.pipeline import Pipeline
 
     try:
         config = LoadedConfig.from_file(args.config)
+        _apply_cache_override(config, no_cache=args.no_cache, refresh_cache=args.refresh_cache)
         pipeline = Pipeline(
             config,
             manifest_path=args.manifest,
@@ -358,7 +381,7 @@ def cmd_trace(args: argparse.Namespace) -> int:
         if not trace_path.exists():
             print(f"error: no trace file at {trace_path}", file=sys.stderr)
             return 1
-        serve(trace_path, port=args.port, open_browser=not args.no_browser)
+        serve(trace_path, port=args.port, open_browser=args.open_browser)
         return 0
     return 0
 
@@ -399,6 +422,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-api-key-check",
         action="store_true",
         help="skip the API key check (for offline/cached runs)",
+    )
+    cache_group = run.add_mutually_exclusive_group()
+    cache_group.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=(
+            "bypass the disk cache entirely: every model call is made fresh, "
+            "and nothing is read from or written to the cache"
+        ),
+    )
+    cache_group.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help=(
+            "ignore existing cache entries and recompute, but still write the "
+            "new results (use to refresh stale or bad cached answers)"
+        ),
     )
     run.add_argument(
         "--steps",
@@ -483,7 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     trace_serve.add_argument("trace_path", help="path to a trace.jsonl file")
     trace_serve.add_argument("--port", type=int, default=8765)
     trace_serve.add_argument(
-        "--no-browser", action="store_true", help="don't open a browser tab automatically"
+        "--open-browser", action="store_true", help="also open a browser tab automatically"
     )
 
     trace.set_defaults(func=cmd_trace)

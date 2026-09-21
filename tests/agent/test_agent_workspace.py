@@ -481,6 +481,37 @@ class TestAutoBuild:
         tools["delete_file"]("src/engine.cpp")
         assert calls == [1, 1]
 
+    def test_fires_once_per_step_across_a_multi_step_session(self, workspace, monkeypatch):
+        """A model editing a workspace over several turns gets a build after each one.
+
+        Walks all four mutating tools in the order a real session would use
+        them - create a file, fix an existing function, patch in another file,
+        then remove what's no longer needed - checking the build count and the
+        report after every individual step, not just at the end.
+        """
+        calls = self._spy_build(monkeypatch, workspace, ok=True)
+        tools = {t.__name__: t for t in make_cpp_tools(workspace, auto_build=True)}
+
+        out = tools["write_file"]("src/scratch.cpp", "// scratch\n")
+        assert len(calls) == 1
+        assert "[auto-build] OK" in out
+
+        out = tools["replace_function"](
+            "src/engine.cpp", "add", "int add(int a, int b) { return a + b; }"
+        )
+        assert len(calls) == 2
+        assert "[auto-build] OK" in out
+
+        out = tools["apply_patch"](
+            "*** Begin Patch\n*** Add File: src/extra.cpp\n+// extra\n*** End Patch"
+        )
+        assert len(calls) == 3
+        assert "[auto-build] OK" in out
+
+        out = tools["delete_file"]("src/scratch.cpp")
+        assert len(calls) == 4
+        assert "[auto-build] OK" in out
+
     def test_a_rejected_patch_does_not_trigger_a_build(self, workspace, monkeypatch):
         calls = self._spy_build(monkeypatch, workspace, ok=True)
         tools = {t.__name__: t for t in make_cpp_tools(workspace, auto_build=True)}

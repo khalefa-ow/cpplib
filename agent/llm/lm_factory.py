@@ -98,15 +98,18 @@ def validate_model_config(cfg: ModelConfig, require_key: bool = True) -> None:
         raise MissingApiKeyError(env_var, cfg.name)
 
 
-def build_lm(
-    cfg: ModelConfig, callbacks: Optional[Sequence[Any]] = None, require_key: bool = True
-) -> Any:
+def build_lm(cfg: ModelConfig, require_key: bool = True) -> Any:
     """Construct a ``dspy.LM`` from a :class:`ModelConfig`.
 
     ``api_base`` and ``api_key`` are passed through ``dspy.LM``'s ``**kwargs``,
     which is how DSPy 3.3 forwards provider options to LiteLLM. ``adapter`` and
     ``track_usage`` are not LM options — they belong to
     :func:`configure_dspy`.
+
+    Takes no ``callbacks``: those are registered once, globally, by
+    :func:`configure_dspy`. DSPy's callback dispatch additively combines
+    ``dspy.settings.callbacks`` with an LM instance's own ``.callbacks``, so
+    attaching the same list here too would fire every hook twice per call.
     """
     dspy = _require_dspy()
     validate_model_config(cfg, require_key=require_key)
@@ -128,7 +131,6 @@ def build_lm(
         max_tokens=cfg.max_tokens,
         cache=cfg.lm_cache,
         num_retries=cfg.num_retries,
-        callbacks=list(callbacks) if callbacks else None,
         **kwargs,
     )
 
@@ -152,10 +154,12 @@ def configure_dspy(
 
     The single place that calls ``dspy.configure``. ``callbacks`` are registered
     globally rather than only on the LM so that module-, tool- and
-    interpreter-level events are traced too, not just completions.
+    interpreter-level events are traced too, not just completions — and so
+    that they fire exactly once per call rather than twice (see
+    :func:`build_lm`).
     """
     dspy = _require_dspy()
-    lm = build_lm(cfg, callbacks=callbacks, require_key=require_key)
+    lm = build_lm(cfg, require_key=require_key)
     settings: dict[str, Any] = {"lm": lm, "track_usage": cfg.track_usage}
     if callbacks:
         settings["callbacks"] = list(callbacks)

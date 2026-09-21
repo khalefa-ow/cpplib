@@ -294,11 +294,27 @@ class TestPipelineExecution:
 
     def test_trace_file_is_written(self, fake_config, fake_stages, manifest_path):
         pipeline = Pipeline(fake_config, manifest_path=manifest_path, stage_classes=fake_stages)
-        pipeline.run()
-        trace = fake_config.resolve_stage("producer").trace.path
+        summary = pipeline.run()
+        trace = summary.trace_path
         events = [json.loads(line)["event"] for line in trace.read_text().strip().splitlines()]
         assert "run_start" in events and "run_end" in events
         assert events.count("stage_start") == 2
+
+    def test_each_run_gets_its_own_trace_file(self, fake_config, fake_stages, manifest_path):
+        pipeline = Pipeline(fake_config, manifest_path=manifest_path, stage_classes=fake_stages)
+        configured = fake_config.resolve_stage("producer").trace.path
+
+        first = pipeline.run(force=True)
+        second = pipeline.run(force=True)
+
+        assert first.trace_path != second.trace_path
+        assert first.run_id in first.trace_path.name
+        assert second.run_id in second.trace_path.name
+        assert not configured.exists()
+        first_events = [json.loads(line) for line in first.trace_path.read_text().splitlines()]
+        second_events = [json.loads(line) for line in second.trace_path.read_text().splitlines()]
+        assert {e["run_id"] for e in first_events} == {first.run_id}
+        assert {e["run_id"] for e in second_events} == {second.run_id}
 
     def test_summary_report_is_readable(self, fake_config, fake_stages, manifest_path):
         pipeline = Pipeline(fake_config, manifest_path=manifest_path, stage_classes=fake_stages)
@@ -475,8 +491,8 @@ class TestStoragePlanStage:
         self, loaded_config, manifest_path, patched_configure
     ):
         pipeline = Pipeline(loaded_config, manifest_path=manifest_path)
-        pipeline.run(only=["storage_plan"])
-        trace = loaded_config.resolve_stage("storage_plan").trace.path
+        summary = pipeline.run(only=["storage_plan"])
+        trace = summary.trace_path
         records = [json.loads(line) for line in trace.read_text().strip().splitlines()]
         events = {record["event"] for record in records}
         assert "predictor_selected" in events

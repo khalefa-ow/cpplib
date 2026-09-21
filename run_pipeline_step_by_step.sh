@@ -33,6 +33,32 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Number of upcoming prompts to auto-answer "yes" to, without stopping to ask.
+# Set by typing a number instead of y/n at any prompt (see confirm() below).
+AUTO_YES=0
+
+# Ask a y/n question, but also accept a number N meaning "yes, and auto-answer
+# yes to the next N prompts (this one included) without stopping to ask again".
+confirm() {
+    local prompt="$1"
+
+    if [ "$AUTO_YES" -gt 0 ]; then
+        AUTO_YES=$((AUTO_YES - 1))
+        echo -e "${prompt} ${GREEN}[auto-yes, ${AUTO_YES} more queued]${NC}"
+        return 0
+    fi
+
+    read -p "$prompt (y/n, or a number to auto-continue that many prompts) " -r
+    if [[ "$REPLY" =~ ^[0-9]+$ ]] && [ "$REPLY" -gt 0 ]; then
+        AUTO_YES=$((REPLY - 1))
+        return 0
+    elif [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 echo -e "${BLUE}=== Agent Pipeline Step-by-Step Runner ===${NC}\n"
 echo "Config: $CONFIG"
 echo ""
@@ -46,10 +72,7 @@ run_stage() {
     echo "$description"
     echo ""
 
-    read -p "Run this stage? (y/n) " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "Run this stage?"; then
         echo -e "${GREEN}Running $stage...${NC}\n"
         uv run python3 -m agent.cli run --config "$CONFIG" --stages "$stage"
         echo -e "\n${GREEN}✓ $stage completed${NC}\n"
@@ -68,9 +91,7 @@ uv run python3 -m agent.cli doctor || { echo "Failed! Install missing tools and 
 echo ""
 
 if [ "$DRY_RUN" = false ]; then
-    read -p "Rebuild prompts from source? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "Rebuild prompts from source?"; then
         uv run python3 -m agent.cli prompts build
         echo ""
     fi
@@ -84,9 +105,7 @@ if [ "$DRY_RUN" = false ]; then
     uv run python3 -m agent.cli config show --config "$CONFIG" | head -100
     echo ""
 
-    read -p "Show full config? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "Show full config?"; then
         uv run python3 -m agent.cli config show --config "$CONFIG"
         echo ""
     fi
@@ -104,9 +123,7 @@ if [ "$DRY_RUN" = true ]; then
     echo "Dry-run complete. Exiting."
     exit 0
 else
-    read -p "Run dry-run first? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "Run dry-run first?"; then
         echo -e "${GREEN}Running dry-run (no API calls)...${NC}\n"
         uv run python3 -m agent.cli run --config "$CONFIG" --dry-run
         echo ""
@@ -119,9 +136,7 @@ run_stage "storage_plan" \
    Input: schema.txt, queries.txt
    Output: artifacts/storage_plan.json"
 if [ $? -eq 0 ]; then
-    read -p "View the storage plan? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "View the storage plan?"; then
         uv run python3 -m agent.cli config show --config "$CONFIG" | grep artifacts_dir
         # Extract artifacts dir from config
         artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
@@ -140,9 +155,7 @@ run_stage "divide" \
    Input: storage_plan.json
    Output: artifacts/schema_levels.json"
 if [ $? -eq 0 ]; then
-    read -p "View schema levels? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "View schema levels?"; then
         artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
         if [ -f "$artifacts_dir/schema_levels.json" ]; then
             cat "$artifacts_dir/schema_levels.json" | jq . 2>/dev/null | head -80
@@ -157,9 +170,7 @@ run_stage "hppgen" \
    Input: schema_levels.json
    Output: storage_layout_*.hpp in gen_project_root/include/"
 if [ $? -eq 0 ]; then
-    read -p "View generated header? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "View generated header?"; then
         gen_root=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('gen_project_root', 'out/gen'))")
         header_file=$(ls "$gen_root/include/storage_layout_"*.hpp 2>/dev/null | head -1)
         if [ -f "$header_file" ]; then
@@ -176,9 +187,7 @@ run_stage "query_codegen" \
    Input: Headers from hppgen, schema levels
    Output: Generated .cpp files, correctness_report.json"
 if [ $? -eq 0 ]; then
-    read -p "View correctness report? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "View correctness report?"; then
         artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
         if [ -f "$artifacts_dir/correctness_report.json" ]; then
             cat "$artifacts_dir/correctness_report.json" | jq . 2>/dev/null | head -100
@@ -193,9 +202,7 @@ run_stage "optimize" \
    Input: Verified queries from query_codegen
    Output: optimization_report.json"
 if [ $? -eq 0 ]; then
-    read -p "View optimization report? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "View optimization report?"; then
         artifacts_dir=$(uv run python3 -c "import json; c=json.load(open('$CONFIG')); print(c.get('common', {}).get('artifacts_dir', 'out/artifacts'))")
         if [ -f "$artifacts_dir/optimization_report.json" ]; then
             cat "$artifacts_dir/optimization_report.json" | jq . 2>/dev/null | head -100

@@ -61,6 +61,32 @@ def _breadcrumb(parent_span_id: Optional[str], spans: dict[str, dict[str, Any]])
     return crumbs
 
 
+def _nearest_module_span(
+    parent_span_id: Optional[str], spans: dict[str, dict[str, Any]]
+) -> Optional[dict[str, Any]]:
+    """The nearest ancestor ``module``-kind span entry, if any.
+
+    Every ``dspy.Module`` subclass's ``__call__`` fires a ``module`` span (see
+    ``JsonlTraceCallback.on_module_start``/``on_module_end``), including
+    nested ones - an RLM call fires one for the ``CppRLM`` wrapper and another,
+    closer one for the inner ``dspy.RLM`` instance whose sub-completions
+    actually produce the ``lm`` spans. Walking up and stopping at the first
+    match gives the concrete predictor class (``RLM``, ``ChainOfThought``,
+    ``Predict``, ...) rather than the outer wrapper, and that same span also
+    carries the ``tools`` list the module was built with (see
+    ``JsonlTraceCallback._start``), so callers get both from one lookup.
+    """
+    current = parent_span_id
+    seen: set[str] = set()
+    while current and current in spans and current not in seen:
+        seen.add(current)
+        entry = spans[current]
+        if entry.get("kind") == "module":
+            return entry
+        current = entry.get("parent_span_id")
+    return None
+
+
 def build_steps(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Turn a flat trace into one ordered step per LLM call.
 
@@ -89,12 +115,15 @@ def build_steps(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for span_id, entry in spans.items():
         if entry.get("kind") != "lm":
             continue
+        module_span = _nearest_module_span(entry.get("parent_span_id"), spans)
         steps.append(
             {
                 "span_id": span_id,
                 "run_id": entry.get("run_id"),
                 "stage": entry.get("stage"),
                 "model": entry.get("name"),
+                "module": (module_span.get("name") or None) if module_span else None,
+                "tools": (module_span.get("tools") or []) if module_span else [],
                 "breadcrumb": _breadcrumb(entry.get("parent_span_id"), spans),
                 "ts": entry.get("start_ts", entry.get("end_ts")),
                 "duration_ms": entry.get("duration_ms"),
@@ -126,13 +155,16 @@ _PAGE = """<!doctype html>
   #sidebar .item.selected { background: #4a90d966; }
   #sidebar .item .crumb { opacity: 0.7; font-size: 11px; }
   #sidebar .item.error { border-left: 3px solid #d9534f; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 11px;
+           color: #fff; margin-right: 6px; vertical-align: middle; }
   #main { flex: 1; overflow-y: auto; padding: 16px 24px; }
   #nav { margin-bottom: 12px; }
   #nav button { padding: 4px 12px; margin-right: 8px; }
   h2 { margin-top: 0; }
   .meta { color: #888; font-size: 13px; margin-bottom: 12px; }
+  .meta.tools { margin-top: -8px; }
   .error-banner { background: #d9534f33; border: 1px solid #d9534f; padding: 8px;
-                   margin-bottom: 12px; border-radius: 4px; }
+                   margin-bottom: 12px; border-radius: 4px; white-space: pre-wrap; }
   pre { background: #8881; padding: 10px; border-radius: 4px; overflow-x: auto;
         white-space: pre-wrap; word-break: break-word; }
   #empty { padding: 24px; color: #888; }
@@ -145,10 +177,42 @@ _PAGE = """<!doctype html>
 let steps = [];
 let selected = null;
 
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// A fixed, deterministic palette so the same module name (RLM, ChainOfThought,
+// Predict, ...) always gets the same color without hardcoding every class DSPy
+// might ship - any new module type just picks a color by name hash.
+const MODULE_COLORS = [
+  "#8e44ad", "#2980b9", "#16a085", "#d35400",
+  "#c0392b", "#2c3e50", "#27ae60", "#8e5b3f",
+];
+function moduleColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return MODULE_COLORS[hash % MODULE_COLORS.length];
+}
+function moduleBadge(name) {
+  if (!name) return "";
+  return "<span class=\\"badge\\" style=\\"background:" + moduleColor(name) + "\\">" +
+         escapeHtml(name) + "</span>";
+}
+
+// C++ source is full of "<...>" (templates, includes), which a naive
+// innerHTML insert would parse as tags and silently swallow or reorder - that
+// is why a response could look empty. Escape first, then format: escaping a
+// string leaves its real newlines alone, but JSON.stringify-ing a dict escapes
+// any newline *inside* a string value as a literal backslash-n, so that gets
+// turned back into a real line break afterwards for pre-wrap to render.
 function fmt(v) {
   if (v === null || v === undefined) return "(none)";
-  if (typeof v === "string") return v;
-  return JSON.stringify(v, null, 2);
+  if (typeof v === "string") return escapeHtml(v);
+  const text = JSON.stringify(v, null, 2);
+  return escapeHtml(text).replace(/\\\\n/g, "\\n").replace(/\\\\t/g, "\\t");
 }
 
 function render() {
@@ -158,8 +222,8 @@ function render() {
     const div = document.createElement("div");
     div.className = "item" + (s.index === selected ? " selected" : "") + (s.error ? " error" : "");
     const crumb = s.breadcrumb.length ? s.breadcrumb.join(" \\u203a ") : s.stage || "";
-    div.innerHTML = "<div>#" + s.index + " " + (s.model || "lm") + "</div>" +
-                     "<div class=\\"crumb\\">" + crumb + "</div>";
+    div.innerHTML = "<div>#" + s.index + " " + moduleBadge(s.module) + escapeHtml(s.model || "lm") + "</div>" +
+                     "<div class=\\"crumb\\">" + escapeHtml(crumb) + "</div>";
     div.onclick = () => { selected = s.index; renderMain(); render(); };
     sidebar.appendChild(div);
   }
@@ -178,13 +242,16 @@ function renderMain() {
     "<button id=\\"prev\\">&larr; prev</button>" +
     "<button id=\\"next\\">next &rarr;</button>" +
     "</div>" +
-    "<h2>Step #" + s.index + " &mdash; " + (s.model || "lm") + "</h2>" +
+    "<h2>Step #" + s.index + " &mdash; " + moduleBadge(s.module) + escapeHtml(s.model || "lm") + "</h2>" +
     "<div class=\\"meta\\">" +
-      (s.breadcrumb.join(" \\u203a ") || s.stage || "") +
+      escapeHtml(s.breadcrumb.join(" \\u203a ") || s.stage || "") +
       " | " + (s.duration_ms !== null && s.duration_ms !== undefined ? s.duration_ms.toFixed(1) + " ms" : "n/a") +
       " | tokens: " + usage +
     "</div>" +
-    (s.error ? "<div class=\\"error-banner\\">" + s.error + "</div>" : "") +
+    (s.tools && s.tools.length
+      ? "<div class=\\"meta tools\\">tools: " + s.tools.map(escapeHtml).join(", ") + "</div>"
+      : "") +
+    (s.error ? "<div class=\\"error-banner\\">" + escapeHtml(s.error) + "</div>" : "") +
     "<h3>Prompt</h3><pre>" + fmt(s.inputs) + "</pre>" +
     "<h3>Response</h3><pre>" + fmt(s.outputs) + "</pre>";
   document.getElementById("prev").onclick = () => { if (selected > 0) { selected--; renderMain(); render(); } };
@@ -257,7 +324,7 @@ def serve(
     path: Path,
     host: str = "127.0.0.1",
     port: int = 8765,
-    open_browser: bool = True,
+    open_browser: bool = False,
 ) -> None:
     """Serve a step-by-step view of one trace file. Blocks until interrupted."""
     trace_path = Path(path)

@@ -342,6 +342,52 @@ class TestRun:
         assert summary["results"][0]["status"] == "ok"
         assert summary["results"][0]["artifacts"]["storage_plan"]["content_hash"]
 
+    def test_cache_flags_control_reuse_across_runs(self, capsys, config_file, manifest_path, monkeypatch):
+        """--no-cache always calls the model; --refresh-cache recomputes but re-caches.
+
+        Every run passes --force so the pipeline's artifact-freshness skip never
+        short-circuits the stage, which would otherwise hide whether the
+        stage's own disk cache (a separate layer) was consulted at all.
+        """
+        import dspy
+        from dspy.utils.dummies import DummyLM
+
+        calls = []
+
+        def fake_configure(model_cfg, callbacks=None, require_key=True):
+            calls.append(1)
+            lm = DummyLM([{"reasoning": "r", "storage_plan": "PLAN", "rationale": "why"}])
+            dspy.configure(lm=lm, callbacks=list(callbacks) if callbacks else None)
+            return lm
+
+        monkeypatch.setattr("agent.stages.storage_plan.configure_dspy", fake_configure)
+
+        base_args = [
+            "run",
+            "--config",
+            str(config_file),
+            "--stages",
+            "storage_plan",
+            "--manifest",
+            str(manifest_path),
+            "--force",
+        ]
+
+        assert main(base_args) == 0
+        assert len(calls) == 1, "first run: nothing cached yet"
+
+        assert main(base_args) == 0
+        assert len(calls) == 1, "second run: the disk cache should have been hit"
+
+        assert main(base_args + ["--no-cache"]) == 0
+        assert len(calls) == 2, "--no-cache must bypass an existing hit"
+
+        assert main(base_args + ["--refresh-cache"]) == 0
+        assert len(calls) == 3, "--refresh-cache must recompute despite a valid entry"
+
+        assert main(base_args) == 0
+        assert len(calls) == 3, "a plain run afterward should hit the entry --refresh-cache wrote"
+
     def test_run_exits_nonzero_when_a_stage_fails(self, capsys, config_file, manifest_path):
         """hppgen without its upstream artifact exercises the failure exit path.
 

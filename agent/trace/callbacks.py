@@ -222,20 +222,22 @@ class JsonlTraceCallback(_Base):  # type: ignore[misc,valid-type]
         token = push_span(span_id)
         with self._lock:
             self._open[call_id] = (span_id, token, time.perf_counter(), kind, label)
-        self.writer.write(
-            {
-                "event": f"{kind}_start",
-                "kind": kind,
-                "name": label,
-                "run_id": current_run_id(),
-                "stage": current_stage(),
-                "span_id": span_id,
-                # current_span_id() is now this span, so the parent is one below.
-                "parent_span_id": _parent_of(span_id),
-                "call_id": call_id,
-                "inputs": inputs,
-            }
-        )
+        record: dict[str, Any] = {
+            "event": f"{kind}_start",
+            "kind": kind,
+            "name": label,
+            "run_id": current_run_id(),
+            "stage": current_stage(),
+            "span_id": span_id,
+            # current_span_id() is now this span, so the parent is one below.
+            "parent_span_id": _parent_of(span_id),
+            "call_id": call_id,
+            "inputs": inputs,
+        }
+        tools = _tool_names(instance)
+        if tools:
+            record["tools"] = tools
+        self.writer.write(record)
 
     def _end(
         self, call_id: str, kind: str, outputs: Any, exception: Optional[BaseException]
@@ -404,6 +406,33 @@ def _describe(instance: Any) -> str:
         if isinstance(value, str) and value:
             return value
     return type(instance).__name__
+
+
+def _tool_names(instance: Any) -> list[str]:
+    """The names of the tools a module instance was built with, if any.
+
+    ``CppRLM`` (``agent/rlm/cpp_module.py``) keeps its tool list on the public
+    ``.tools`` attribute - plain callables, each carrying its original
+    ``__name__`` through ``functools.wraps`` (see
+    ``agent/rlm/cpp_tools.py``'s ``_traced`` decorator). The ``dspy.RLM``
+    instance it wraps normalizes the same list onto a private
+    ``._user_tools`` dict of ``dspy.Tool`` keyed by name instead, so both are
+    checked - one or the other resolves for every module actually built by
+    this pipeline. Neither exists on a plain ``Predict``/``ChainOfThought``,
+    which is the common case, so this quietly returns ``[]`` there.
+    """
+    tools = getattr(instance, "tools", None)
+    if not tools:
+        tools = getattr(instance, "_user_tools", None)
+    if not tools:
+        return []
+    if isinstance(tools, dict):
+        return sorted(tools.keys())
+    names = []
+    for tool in tools:
+        name = getattr(tool, "name", None) or getattr(tool, "__name__", None) or type(tool).__name__
+        names.append(str(name))
+    return names
 
 
 def _extract_usage(outputs: Any) -> dict[str, int]:

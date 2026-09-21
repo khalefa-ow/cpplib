@@ -544,6 +544,9 @@ class QueryCodegenStage(Stage):
             writer=self.writer,
             stage=self.name,
             require_api_key=self.ctx.require_api_key,
+            workspace=self._tool_workspace(),
+            allow_writes=True,
+            allow_build=True,
         )
         return extract_code(value["fixed_code"])
 

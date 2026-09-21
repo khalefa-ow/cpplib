@@ -85,6 +85,22 @@ class RunSummary(BaseModel):
         return "\n".join(lines)
 
 
+def _run_trace_path(configured_path: Optional[Path], run_id: str) -> Optional[Path]:
+    """Give each run its own trace file so unrelated runs never mix in one JSONL.
+
+    ``TraceWriter`` appends, so a static configured path (e.g. ``trace.jsonl``)
+    would otherwise accumulate events from every run ever made against it, and
+    the webview has no way to tell them apart. Inserting the run id before the
+    suffix (``trace.jsonl`` -> ``trace_<run_id>.jsonl``) keeps each run's file
+    unique while staying deterministic: a resumed run that passes back the same
+    ``run_id`` (e.g. the step-by-step CLI mode, one stage per call) maps to the
+    same file and correctly keeps appending to it.
+    """
+    if configured_path is None:
+        return None
+    return configured_path.with_name(f"{configured_path.stem}_{run_id}{configured_path.suffix}")
+
+
 def order_stages(
     names: Sequence[str],
     stage_classes: Optional[dict[str, Type[Stage]]] = None,
@@ -204,14 +220,15 @@ class Pipeline:
         """
         names = self.plan(only=only, start_from=start_from)
         first_cfg = self.config.resolve_stage(names[0])
+        rid = run_id or new_id()
+        trace_path = _run_trace_path(first_cfg.trace.path, rid)
 
         store = ArtifactStore(first_cfg.artifacts_dir)
         writer = TraceWriter(
-            path=first_cfg.trace.path,
+            path=trace_path,
             stdout=first_cfg.trace.stdout,
             max_field_chars=first_cfg.trace.max_field_chars,
         )
-        rid = run_id or new_id()
 
         weave = maybe_init_weave(first_cfg.trace)
         wandb = maybe_init_wandb(
@@ -220,7 +237,7 @@ class Pipeline:
             config={"stages": names, "model": first_cfg.model.name},
         )
 
-        summary = RunSummary(run_id=rid, trace_path=first_cfg.trace.path)
+        summary = RunSummary(run_id=rid, trace_path=trace_path)
         started = time.perf_counter()
         ctx = RunContext(
             config=self.config,
