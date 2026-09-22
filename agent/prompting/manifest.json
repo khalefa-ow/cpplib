@@ -51,11 +51,13 @@
       "composes": {},
       "description": "",
       "id": "hppgen_policy",
-      "placeholders": [],
+      "placeholders": [
+        "ingestion_signature"
+      ],
       "role": "task",
       "stage": "hppgen",
-      "text": "Generate the storage-layout header for an in-memory, read-only analytical C++ query engine.\n\nYou are given one hint level: the schema facts, and \u2014 depending on the level \u2014 the storage-plan hints that accompany them. Implement exactly what the level text supports and nothing more.\n\nThe header must contain:\n\n1. The column and table structures\n   - One struct per table, holding its columns as contiguous containers.\n   - Variable-length values as an offset array plus a character data array, not as a container of std::string per row, unless the level text says otherwise.\n   - Nullability only for columns the schema marks nullable.\n   - Fixed-width encodings where the level text calls for them (dictionary ids for low-cardinality strings, integral days for dates, narrowed integers).\n\n2. The database structure\n   - One struct aggregating every table, plus whatever lookup structures the level text describes.\n   - A declared entry point for ingestion; its definition belongs in the loader, not here.\n\n3. Access-path members the level text justifies, and no others.\n\nHard rules:\n- Everything goes in one self-contained header, wrapped in `#pragma once` and the namespace you are given.\n- Header-only: declarations, type definitions and inline functions. No I/O, no Parquet reading, no query logic.\n- Include only what you use, from the standard library.\n- Compile cleanly under the project's C++ standard. Prefer std::vector and fixed-width integer types from <cstdint>.\n- Do not invent tables, columns, indexes or encodings the level text does not support. If the level text omits something you would need, leave it out rather than guessing.\n- Name types and members after the schema's own names so later stages can find them.\n\nOutput only the header source. No prose, no markdown fences.\n",
-      "version": 1
+      "text": "Generate the storage-layout header for an in-memory, read-only analytical C++ query engine.\n\nYou are given one hint level: the schema facts, and \u2014 depending on the level \u2014 the storage-plan hints that accompany them. Implement exactly what the level text supports and nothing more.\n\nThe header must contain:\n\n1. The column and table structures\n   - One struct per table, holding its columns as contiguous containers.\n   - Variable-length values as an offset array plus a character data array, not as a container of std::string per row, unless the level text says otherwise.\n   - Nullability only for columns the schema marks nullable.\n   - Fixed-width encodings where the level text calls for them (dictionary ids for low-cardinality strings, integral days for dates, narrowed integers).\n\n2. The database structure\n   - One struct aggregating every table, plus whatever lookup structures the level text describes.\n   - Declare the ingestion entry point with exactly this signature: `${ingestion_signature}`. Its definition belongs in the loader, not here \u2014 declare it, do not define it, and do not change its name or signature.\n\n3. Access-path members the level text justifies, and no others.\n\nHard rules:\n- Everything goes in one self-contained header, wrapped in `#pragma once` and the namespace you are given.\n- Header-only: declarations, type definitions and inline functions. No I/O, no Parquet reading, no query logic.\n- Include only what you use, from the standard library.\n- Compile cleanly under the project's C++ standard. Prefer std::vector and fixed-width integer types from <cstdint>.\n- Do not invent tables, columns, indexes or encodings the level text does not support. If the level text omits something you would need, leave it out rather than guessing.\n- Name types and members after the schema's own names so later stages can find them.\n\nOutput only the header source. No prose, no markdown fences.\n",
+      "version": 2
     },
     "optim_add_timings_collect_stats": {
       "composes": {},
@@ -221,6 +223,30 @@
       "stage": "query_codegen",
       "text": "Implement one SQL query as C++ against the generated storage layout.\n\nYou are given the query, the storage-layout header it must use, and the hint level's description of that layout. Produce a single self-contained translation unit that executes the query over data already loaded in memory.\n\nRequirements:\n\n1. Interface\n   - Include the storage-layout header and use its types; do not redefine them.\n   - Expose exactly one entry point: `${entry_signature}`.\n   - Write results to the provided output stream, one row per line.\n   - CRITICAL: Columns MUST be separated by a SINGLE CHARACTER: '${delimiter}' (comma).\n   - Do NOT use pipes, spaces, or any other separator. Output format: column1,column2,column3\n   - For string columns: trim all trailing whitespace, control characters, newlines and carriage returns before output.\n   - Print numeric values so they compare equal to the reference output: integers without a decimal point, and DECIMAL columns with their declared scale.\n   - ${header_rule}\n\n2. Execution\n   - Single-threaded. No SQL parsing at runtime: compile the query's plan into the code.\n   - Choose join order and build sides from the cardinalities you were given, smaller side as the hash build side.\n   - Respect the query's ORDER BY exactly; if it has none, emit rows in whatever order the plan produces.\n   - Apply filters as early as possible and touch only the columns the query needs.\n\n3. Constraints\n   - Do not modify the storage layout, and do not add per-query indexes, materialized results or precomputed lookup tables. The layout is shared by every query.\n   - Only the standard library. No external dependencies.\n   - No undefined behaviour: check bounds where the plan does not already guarantee them, and initialize every accumulator.\n\nOutput only the C++ source for this one query. No prose, no markdown fences.\n",
       "version": 3
+    },
+    "query_codegen_loader_task": {
+      "composes": {},
+      "description": "",
+      "id": "query_codegen_loader_task",
+      "placeholders": [
+        "entry_signature"
+      ],
+      "role": "task",
+      "stage": "query_codegen",
+      "text": "Implement the storage layout's ingestion entry point in C++.\n\nYou are given the storage-layout header this entry point must populate, and where the dataset lives. Produce a single self-contained translation unit that reads the dataset and builds the in-memory layout the header declares.\n\nRequirements:\n\n1. Interface\n   - Include the storage-layout header and use its types; do not redefine them.\n   - Expose exactly one entry point: `${entry_signature}`.\n   - Populate every field exactly as the header's own comments describe: dictionary codes, dense ids, fixed-point scaled decimals, sorted permutations, zone maps, and any other encoding a column's comment documents. Those comments are the encoding specification, not a suggestion.\n\n2. Reading the dataset\n   - Read the dataset with the Apache Arrow / Parquet C++ API (`<arrow/...>`, `<parquet/...>`). One Parquet file per table, named after the table, under the dataset directory you are given.\n   - Do not parse CSV, and do not invent a binary format of your own.\n\n3. Constraints\n   - Do not modify the storage layout, and do not add columns, tables or structures the header does not declare.\n   - Standard library and Arrow/Parquet only. No other external dependencies.\n   - No undefined behaviour: check bounds, and initialize every buffer you allocate.\n\nOutput only the C++ source for the loader. No prose, no markdown fences.\n",
+      "version": 1
+    },
+    "query_codegen_main_task": {
+      "composes": {},
+      "description": "",
+      "id": "query_codegen_main_task",
+      "placeholders": [
+        "entry_signature"
+      ],
+      "role": "task",
+      "stage": "query_codegen",
+      "text": "Implement the engine's command-line entry point in C++.\n\nYou are given the storage-layout header, the dispatch declarations that route a query id to its implementation, and the exact command line this program must satisfy. Produce a single self-contained translation unit.\n\nRequirements:\n\n1. Interface\n   - Include the storage-layout header and the dispatch header; use their declared types and functions, do not redefine them.\n   - Parse argv so the program accepts exactly the command line given, in any argument order.\n   - Build the database exactly once, by calling `${entry_signature}`, before dispatching any query.\n   - Look up the requested query through the given dispatch function and call it with the database and the output destination the command line specifies.\n\n2. Constraints\n   - Do not implement any query logic here; this file only wires argument parsing, one-time ingestion and dispatch together.\n   - Standard library only. No Arrow/Parquet includes here -- ingestion is the loader's job, not this file's.\n   - Exit non-zero and report a clear message on a bad argument or an unknown query id.\n\nOutput only the C++ source for the entry point. No prose, no markdown fences.\n",
+      "version": 1
     },
     "storage_plan_policy": {
       "composes": {},

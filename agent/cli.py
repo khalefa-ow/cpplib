@@ -74,6 +74,31 @@ def _probe_command(command: str, args: Sequence[str] = ("--version",)) -> str:
         return f"present  [{path}]"
 
 
+def _probe_pkgconfig(*modules: str) -> str:
+    """Report whether pkg-config modules (a C++ library, not a binary) resolve.
+
+    Used for Arrow/Parquet, which query_codegen's LLM-generated loader links
+    against (see ``agent.rlm.compile.arrow_pkgconfig_flags``); a missing one
+    otherwise only surfaces deep in a confusing CMake ``find_package(...
+    REQUIRED)`` failure.
+    """
+    if shutil.which("pkg-config") is None:
+        return "MISSING (pkg-config itself is not on PATH)"
+    try:
+        proc = subprocess.run(
+            ["pkg-config", "--modversion", *modules],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:
+        return f"BROKEN ({type(exc).__name__})"
+    if proc.returncode != 0:
+        return f"MISSING ({', '.join(modules)} — install libarrow-dev/libparquet-dev)"
+    versions = proc.stdout.strip().splitlines()
+    return ", ".join(f"{m} {v}" for m, v in zip(modules, versions))
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Print an environment report.
 
@@ -93,6 +118,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"  {'cmake':16s} {_probe_command('cmake')}")
     for compiler in ("g++", "clang++"):
         print(f"  {compiler:16s} {_probe_command(compiler, ('--version',))}")
+    print(f"  {'arrow/parquet':16s} {_probe_pkgconfig('arrow', 'parquet')}"
+          "  <- linked by query_codegen's generated loader")
     print()
 
     print("API keys:")

@@ -143,11 +143,6 @@ class HppGenStage(Stage):
                 status="failed", error=str(exc), duration_s=time.perf_counter() - started
             )
 
-        policy = self.registry.render_any(
-            self.prompt_ids()[0] if self.prompt_ids() else None,
-            inline=cfg.params.get("policy"),
-        )
-
         headers: dict[str, str] = {}
         detail: dict[str, dict[str, Any]] = {}
         metrics: dict[str, Any] = {}
@@ -155,6 +150,14 @@ class HppGenStage(Stage):
 
         with stage_context(self.name):
             for level in levels:
+                # Rendered per level: the ingestion signature is namespaced per
+                # level, so the substituted policy text differs even though the
+                # prompt id/version does not.
+                policy = self.registry.render_any(
+                    self.prompt_ids()[0] if self.prompt_ids() else None,
+                    inline=cfg.params.get("policy"),
+                    ingestion_signature=self._ingestion_signature(level),
+                )
                 with new_span("level", level.name):
                     outcome, extra = self._generate_level(
                         level=level,
@@ -365,3 +368,23 @@ class HppGenStage(Stage):
         if not self.cfg.params.get("rlm_tools"):
             return None
         return self.ctx.workspace_for(self.cfg)
+
+    def _ingestion_signature(self, level: LevelConfig) -> str:
+        """The ingestion entry point's exact signature, dictated rather than left to the model.
+
+        ``query_codegen``'s loader generation has to call this exact function,
+        so this stage and ``query_codegen`` must agree on its name without
+        talking to each other directly. Both default to ``build_database`` and
+        read the same ``params`` keys (``database_type_name``,
+        ``ingestion_function_name``, or the whole thing via
+        ``ingestion_signature``); if you override any of them, override it
+        identically in both stages' config, the same way ``entry_signature``
+        already has to agree between ``query_codegen``'s generation and repair
+        prompts.
+        """
+        override = self.cfg.params.get("ingestion_signature")
+        if override:
+            return str(override)
+        db_type = self.cfg.params.get("database_type_name", "Database")
+        function = self.cfg.params.get("ingestion_function_name", "build_database")
+        return f"{level.namespace}::{db_type} {function}()"

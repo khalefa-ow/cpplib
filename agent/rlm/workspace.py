@@ -478,8 +478,18 @@ class CppWorkspace:
 
     # --- compiling --------------------------------------------------------
 
-    def compile_file(self, rel_path: str | Path, syntax_only: bool = True) -> CompileResult:
-        """Compile one workspace file with the configured standard and flags."""
+    def compile_file(
+        self,
+        rel_path: str | Path,
+        syntax_only: bool = True,
+        extra_flags: Optional[Sequence[str]] = None,
+    ) -> CompileResult:
+        """Compile one workspace file with the configured standard and flags.
+
+        ``extra_flags`` appends to (not replaces) ``compile_config.extra_flags``
+        for this one call, e.g. Arrow/Parquet's pkg-config flags when compiling
+        a loader file that ``#include``s them but no other file in the tree does.
+        """
         path = self._resolve_inside(rel_path)
         cfg = self.compile_config
         include_dirs = list(cfg.include_dirs) + [self.source_dir, self.root]
@@ -488,7 +498,7 @@ class CppWorkspace:
             compiler=cfg.compiler,
             cpp_standard=cfg.cpp_standard,
             include_dirs=include_dirs,
-            extra_flags=cfg.extra_flags,
+            extra_flags=list(cfg.extra_flags) + list(extra_flags or []),
             syntax_only=syntax_only,
             timeout_s=cfg.timeout_s,
         )

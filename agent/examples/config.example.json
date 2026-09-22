@@ -80,12 +80,20 @@
     "hppgen": {
       "enabled": true,
       "active_levels": ["no_hints", "organization_level", "all_hints"],
-      "cache": { "dir": "out/.cache/hppgen" }
+      "cache": { "dir": "out/.cache/hppgen" },
+      "params": {
+        "rlm_tools": true
+      }
     },
     "query_codegen": {
       "enabled": true,
       "active_levels": ["no_hints", "organization_level", "all_hints"],
-      "prompt_ids": ["query_codegen_task", "fix_compile_errors"],
+      "prompt_ids": [
+        "query_codegen_task",
+        "fix_compile_errors",
+        "query_codegen_loader_task",
+        "query_codegen_main_task"
+      ],
       "cache": { "dir": "out/.cache/query_codegen" },
       "prompt_vars": {
         "compiler": "g++",
@@ -105,7 +113,8 @@
         "header_mode": "gold",
         "sort_rows": false,
         "float_tolerance": 1e-6,
-        "max_correctness_rounds": 5
+        "max_correctness_rounds": 5,
+        "rlm_tools": true
       }
     },
     "optimize": {
@@ -121,7 +130,8 @@
         "target_factor": 2.0,
         "runtime_pattern": "total runtime: ([0-9.]+)s",
         "trace_flag": "--trace",
-        "trace_log": "tracing_output.log"
+        "trace_log": "tracing_output.log",
+        "rlm_tools": true
       }
     }
   }

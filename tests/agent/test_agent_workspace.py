@@ -322,6 +322,30 @@ class TestCompiling:
         assert ok20.ok, ok20.brief()
         assert old.ok is False
 
+    def test_compile_file_extra_flags_append_to_the_configured_ones(self, workspace):
+        """A per-call extra_flags override adds to compile_config.extra_flags.
+
+        Needed so one file (e.g. a loader linking Arrow/Parquet) can get flags
+        (like Arrow's pkg-config cflags) that every other file in the tree
+        doesn't need, without mutating the shared CompileConfig.
+        """
+        workspace.write_file(
+            "src/needs_macro.cpp",
+            "#ifndef ONLY_FOR_THIS_FILE\n#error \"macro missing\"\n#endif\nint f() { return 1; }\n",
+        )
+        without = workspace.compile_file("src/needs_macro.cpp")
+        assert without.ok is False
+        assert "macro missing" in without.brief()
+
+        with_flag = workspace.compile_file(
+            "src/needs_macro.cpp", extra_flags=["-DONLY_FOR_THIS_FILE"]
+        )
+        assert with_flag.ok, with_flag.brief()
+
+        # The override must not leak into the shared config for other files.
+        still_without = workspace.compile_file("src/engine.cpp")
+        assert still_without.ok, still_without.brief()
+
     def test_missing_source_is_not_reported_as_a_compiler_problem(self, workspace):
         result = workspace.compile_file("src/absent.cpp")
         assert result.ok is False

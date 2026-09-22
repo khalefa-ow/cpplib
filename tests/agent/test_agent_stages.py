@@ -497,6 +497,42 @@ RUN_COMMAND = (
     "&& ./engine_{query_id} > {output}'"
 )
 
+# Stand-ins for the two new LLM-generated build entry points. LOADER_SOURCE
+# defines the ingestion entry point GOOD_HEADER's namespace expects
+# (build_database, matching QueryCodegenStage._ingestion_signature's default)
+# without needing a real Arrow/Parquet read. Defined *inside* `namespace
+# basic { ... }` deliberately, not as `basic::Database build_database()` at
+# global scope - that form only qualifies the return type, not the function
+# name, so it silently defines a global-scope build_database() and fails to
+# link against a caller that declared basic::build_database(). A per-file
+# -fsyntax-only check can't see that; only a real link catches it, which is
+# what test_sync_cmake_project_regenerates_from_current_disk_state exercises.
+# MAIN_SOURCE forward-declares the entry point itself (GOOD_HEADER doesn't
+# declare it - only the real hppgen-generated header does, per
+# hppgen_policy's ${ingestion_signature} placeholder) and calls the dispatch
+# header's get_query_func, matching what _generate_build_entrypoint actually
+# writes for query_dispatch.hpp.
+LOADER_SOURCE = (
+    '#include "basic.hpp"\n\n'
+    "namespace basic {\n"
+    "Database build_database() {\n"
+    "    return Database{};\n"
+    "}\n"
+    "}\n"
+)
+MAIN_SOURCE = (
+    '#include "basic.hpp"\n'
+    '#include "query_dispatch.hpp"\n'
+    "#include <iostream>\n\n"
+    "namespace basic { Database build_database(); }\n\n"
+    "int main(int argc, char** argv) {\n"
+    "    auto db = basic::build_database();\n"
+    '    auto* fn = get_query_func("q1");\n'
+    "    if (fn) fn(db, std::cout);\n"
+    "    return 0;\n"
+    "}\n"
+)
+
 
 @pytest.fixture
 def codegen_setup(config_dict, tmp_path):
@@ -801,6 +837,189 @@ class TestQueryCodegenStage:
         row = again.results[0].artifacts["correctness_report"].read_json()["queries"]["q1"]
         assert row["cache_hit"] is True
         assert len(calls) == after
+
+    def test_loader_and_main_are_generated_when_dataset_dir_is_configured(
+        self, config_dict, manifest_path, codegen_setup, monkeypatch, tmp_path
+    ):
+        """Phase A: an LLM-generated loader.cpp/main.cpp/query_dispatch.hpp.
+
+        Skipped entirely when no dataset directory is configured (see
+        test_the_build_is_skipped_when_the_tree_is_not_a_cmake_project); here
+        it is, so this exercises the actual generation, verification and
+        payload shape the two new prompts receive.
+        """
+        codegen_setup()
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        config_dict["common"]["gold"]["dataset_dir"] = str(dataset_dir)
+
+        calls_by_output: dict[tuple, list] = {}
+
+        def fake_invoke(signature, payload, outputs, **kwargs):
+            calls_by_output.setdefault(tuple(outputs), []).append(dict(payload))
+            if outputs == ("loader_code", "notes"):
+                return {
+                    "loader_code": LOADER_SOURCE,
+                    "notes": "n",
+                    "predictor": "Fake",
+                    "usage": {},
+                }
+            if outputs == ("main_code", "notes"):
+                return {"main_code": MAIN_SOURCE, "notes": "n", "predictor": "Fake", "usage": {}}
+            if outputs == ("source_code", "notes"):
+                return {
+                    "source_code": _engine_source("Alice,1"),
+                    "notes": "n",
+                    "predictor": "Fake",
+                    "usage": {},
+                }
+            return {name: "" for name in outputs} | {"predictor": "Fake", "usage": {}}
+
+        monkeypatch.setattr("agent.stages.query_codegen.invoke", fake_invoke)
+        config = _config(config_dict, _codegen_stage(params={"build_project": False}))
+        summary = _run(config, manifest_path, "query_codegen")
+        assert summary.ok, summary.report()
+
+        cfg = LoadedConfig(config_dict).resolve_stage("query_codegen")
+        loader_path = cfg.gen_project_root / "src" / "loader.cpp"
+        main_path = cfg.gen_project_root / "src" / "main.cpp"
+        dispatch_header_path = cfg.gen_project_root / "query_dispatch.hpp"
+        assert loader_path.read_text() == LOADER_SOURCE
+        assert main_path.read_text() == MAIN_SOURCE
+        assert "get_query_func" in dispatch_header_path.read_text()
+        assert "basic::Database" in dispatch_header_path.read_text()
+
+        loader_payload = calls_by_output[("loader_code", "notes")][0]
+        assert str(dataset_dir) in loader_payload["dataset_description"]
+        assert "struct Database" in loader_payload["storage_header"]
+        assert "build_database" in loader_payload["entry_signature"]
+
+        main_payload = calls_by_output[("main_code", "notes")][0]
+        assert "build_database" in main_payload["entry_signature"]
+        assert main_payload["run_command"] == cfg.params["run_command"]
+
+    def test_loader_and_main_are_cached_across_runs(
+        self, config_dict, manifest_path, codegen_setup, monkeypatch, tmp_path
+    ):
+        codegen_setup()
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        config_dict["common"]["gold"]["dataset_dir"] = str(dataset_dir)
+
+        calls_by_output: dict[tuple, list] = {}
+
+        def fake_invoke(signature, payload, outputs, **kwargs):
+            calls_by_output.setdefault(tuple(outputs), []).append(dict(payload))
+            if outputs == ("loader_code", "notes"):
+                return {
+                    "loader_code": LOADER_SOURCE,
+                    "notes": "n",
+                    "predictor": "Fake",
+                    "usage": {},
+                }
+            if outputs == ("main_code", "notes"):
+                return {"main_code": MAIN_SOURCE, "notes": "n", "predictor": "Fake", "usage": {}}
+            if outputs == ("source_code", "notes"):
+                return {
+                    "source_code": _engine_source("Alice,1"),
+                    "notes": "n",
+                    "predictor": "Fake",
+                    "usage": {},
+                }
+            return {name: "" for name in outputs} | {"predictor": "Fake", "usage": {}}
+
+        monkeypatch.setattr("agent.stages.query_codegen.invoke", fake_invoke)
+        config = _config(config_dict, _codegen_stage(params={"build_project": False}))
+
+        assert _run(config, manifest_path, "query_codegen").ok
+        assert len(calls_by_output[("loader_code", "notes")]) == 1
+        assert len(calls_by_output[("main_code", "notes")]) == 1
+
+        assert _run(config, manifest_path, "query_codegen", force=True).ok
+        assert len(calls_by_output[("loader_code", "notes")]) == 1
+        assert len(calls_by_output[("main_code", "notes")]) == 1
+
+    def test_sync_cmake_project_regenerates_from_current_disk_state(
+        self, config_dict, manifest_path, codegen_setup, monkeypatch, tmp_path, project_inputs
+    ):
+        """Regression: a stale CMakeLists.txt from before a query existed must not persist.
+
+        Previously the CMake/dispatch generation ran once, before any query
+        was written, and never refreshed - so a second query's source never
+        made it into the build. _sync_cmake_project is now called fresh right
+        before every real build attempt instead (see _process_query). Proven
+        end to end with a real cmake/g++/Arrow build and link (deliberately -
+        a stale or mismatched CMakeLists.txt is exactly what a real build
+        sees, and a per-file -fsyntax-only check alone cannot catch a link
+        failure), not just by inspecting CMakeLists.txt's text.
+
+        The dispatch-shaped query source here (``namespace queries { void
+        run(...) }``, no ``main()`` of its own) is what a real single-level
+        run needs - unlike ``_engine_source()``, used elsewhere in this file
+        for the older per-query-standalone-binary ``run_command`` style,
+        which would collide with ``src/main.cpp``'s own ``main()`` once
+        wrapped into the shared ``engine`` binary.
+        """
+        (project_inputs / "queries.txt").write_text(
+            "-- Q1: first\nSELECT 1;\n-- Q2: second\nSELECT 2;\n", encoding="utf-8"
+        )
+        gold_dir = codegen_setup()
+        (gold_dir / "q2.csv").write_text("name,id\nAlice,1\n", encoding="utf-8")
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        config_dict["common"]["gold"]["dataset_dir"] = str(dataset_dir)
+
+        query_source = (
+            '#include "basic.hpp"\n#include <ostream>\n\n'
+            "namespace queries {\n"
+            "void run(const basic::Database& db, std::ostream& out) {\n"
+            '    out << "Alice,1\\n";\n'
+            "}\n"
+            "}\n"
+        )
+        # A minimal engine dispatching by the one positional arg, matching
+        # get_query_func's exact-string lookup ("q1"/"q2").
+        main_source = (
+            '#include "basic.hpp"\n#include "query_dispatch.hpp"\n#include <iostream>\n\n'
+            "namespace basic { Database build_database(); }\n\n"
+            "int main(int argc, char** argv) {\n"
+            "    if (argc < 2) return 1;\n"
+            "    auto db = basic::build_database();\n"
+            "    auto* fn = get_query_func(argv[1]);\n"
+            "    if (!fn) return 1;\n"
+            "    fn(db, std::cout);\n"
+            "    return 0;\n"
+            "}\n"
+        )
+
+        def fake_invoke(signature, payload, outputs, **kwargs):
+            if outputs == ("loader_code", "notes"):
+                return {"loader_code": LOADER_SOURCE, "notes": "", "predictor": "F", "usage": {}}
+            if outputs == ("main_code", "notes"):
+                return {"main_code": main_source, "notes": "", "predictor": "F", "usage": {}}
+            if outputs == ("source_code", "notes"):
+                return {"source_code": query_source, "notes": "", "predictor": "F", "usage": {}}
+            return {name: "" for name in outputs} | {"predictor": "F", "usage": {}}
+
+        monkeypatch.setattr("agent.stages.query_codegen.invoke", fake_invoke)
+        # "auto" (the default) builds once src/main.cpp exists.
+        config = _config(
+            config_dict,
+            _codegen_stage(params={"run_command": "sh -c '{project_root}/build/engine {query_id} > {output}'"}),
+        )
+        summary = _run(config, manifest_path, "query_codegen")
+        assert summary.ok, summary.report()
+
+        cfg = LoadedConfig(config_dict).resolve_stage("query_codegen")
+        cmake_text = (cfg.gen_project_root / "CMakeLists.txt").read_text()
+        assert "q1_wrapped.cpp" in cmake_text
+        assert "q2_wrapped.cpp" in cmake_text
+
+        report = summary.results[0].artifacts["correctness_report"].read_json()["queries"]
+        assert sorted(report) == ["q1", "q2"]
+        for row in report.values():
+            assert row["built"] is True, row["report"]
+            assert row["status"] == "matched", row["report"]
 
     def test_multiple_active_levels_are_generated_sequentially(
         self, config_dict, manifest_path, codegen_setup, queued_invoke

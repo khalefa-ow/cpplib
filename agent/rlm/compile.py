@@ -150,6 +150,31 @@ def resolve_compiler(preferred: str = "g++") -> Optional[str]:
     return None
 
 
+def arrow_pkgconfig_flags() -> list[str]:
+    """Compile flags for Arrow/Parquet, via ``pkg-config``.
+
+    Best-effort: an empty list on any failure (no ``pkg-config``, or Arrow not
+    installed) degrades the loader's syntax-only check to "no extra flags"
+    rather than raising. A real Arrow absence still surfaces clearly at the
+    actual CMake build, which ``find_package(Arrow REQUIRED)`` fails loudly on.
+    """
+    import shlex
+
+    if shutil.which("pkg-config") is None:
+        return []
+    try:
+        result = subprocess.run(
+            ["pkg-config", "--cflags", "arrow", "parquet"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+    except Exception:
+        return []
+    return shlex.split(result.stdout)
+
+
 def build_command(
     source: Path,
     compiler: str = "g++",
