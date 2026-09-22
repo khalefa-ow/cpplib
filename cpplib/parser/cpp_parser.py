@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from typing import List, Optional
-from tree_sitter import Parser, Language
+from tree_sitter import Parser, Language, Node
 from tree_sitter_cpp import language as cpp_language
 
 
